@@ -5,8 +5,10 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushBut
     QTableWidgetItem, QHeaderView, QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox, QFormLayout,
     QMessageBox, QGroupBox)
 from PyQt6.QtCore import Qt
+from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.figure import Figure
 from database import connect
-from finance import to_cents, money, compound_interest, projected_value
+from finance import to_cents, money, compound_interest, projected_value, monte_carlo
 from charts import CapitalChart, AllocationChart
 
 
@@ -305,47 +307,107 @@ class SimulationPage(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.addLayout(heading("МОДЕЛИРОВАНИЕ", "Прогноз при постоянной годовой доходности"))
-        box = QGroupBox("СЦЕНАРИЙ")
+        layout.addLayout(heading("МОДЕЛИРОВАНИЕ", "Детерминированный прогноз и Monte Carlo"))
+
+        box = QGroupBox("ПАРАМЕТРЫ СИМУЛЯЦИИ")
         form = QFormLayout(box)
         self.initial = QDoubleSpinBox()
         self.initial.setRange(0.01, 1_000_000_000)
         self.initial.setDecimals(2)
         self.initial.setValue(10000)
+
         self.rate = QDoubleSpinBox()
         self.rate.setRange(-99, 100)
         self.rate.setDecimals(2)
         self.rate.setValue(6)
+
+        self.volatility = QDoubleSpinBox()
+        self.volatility.setRange(0, 100)
+        self.volatility.setDecimals(2)
+        self.volatility.setValue(15)
+
         self.years = QSpinBox()
         self.years.setRange(1, 50)
         self.years.setValue(10)
+
+        self.simulations = QSpinBox()
+        self.simulations.setRange(100, 10000)
+        self.simulations.setSingleStep(500)
+        self.simulations.setValue(1000)
+
         self.output = QLabel("—")
-        self.output.setStyleSheet("font-size: 24px; color: #73e0bd; font-weight: bold;")
-        self.details = QLabel("Укажи параметры и рассчитай прогноз.")
-        run = QPushButton("РАССЧИТАТЬ ПРОГНОЗ")
+        self.output.setStyleSheet("font-size: 22px; color: #73e0bd; font-weight: bold;")
+        self.details = QLabel("Укажи параметры и запусти моделирование.")
+        self.details.setWordWrap(True)
+
+        run = QPushButton("ЗАПУСТИТЬ MONTE CARLO")
         run.setObjectName("Action")
         run.clicked.connect(self.run_projection)
+
         form.addRow("НАЧАЛЬНЫЙ КАПИТАЛ", self.initial)
-        form.addRow("ГОДОВАЯ ДОХОДНОСТЬ (%)", self.rate)
-        form.addRow("ЛЕТ", self.years)
+        form.addRow("ОЖИДАЕМАЯ ДОХОДНОСТЬ В ГОД (%)", self.rate)
+        form.addRow("ВОЛАТИЛЬНОСТЬ В ГОД (%)", self.volatility)
+        form.addRow("ГОРИЗОНТ (ЛЕТ)", self.years)
+        form.addRow("КОЛИЧЕСТВО СЦЕНАРИЕВ", self.simulations)
         form.addRow("", run)
         layout.addWidget(box)
-        layout.addWidget(QLabel("ПРОГНОЗИРУЕМАЯ СТОИМОСТЬ"))
+
+        layout.addWidget(QLabel("СРЕДНИЙ РЕЗУЛЬТАТ"))
         layout.addWidget(self.output)
         layout.addWidget(self.details)
-        layout.addStretch()
+
+        self.figure = Figure(figsize=(7, 2.5), dpi=90)
+        self.canvas = FigureCanvas(self.figure)
+        self.axes = self.figure.add_subplot(111)
+        layout.addWidget(self.canvas, 1)
+
+        note = QLabel("Модель использует случайные годовые доходности с логнормальным распределением. "
+                      "Это учебный сценарный расчёт, а не прогноз реальной доходности.")
+        note.setWordWrap(True)
+        note.setStyleSheet("color: #8b999c;")
+        layout.addWidget(note)
 
     def run_projection(self):
         try:
             initial = to_cents(self.initial.value())
-            result = projected_value(initial, self.rate.value(), self.years.value())
-            self.output.setText(money(result))
-            self.details.setText(f"Изменение: {money(result-initial)} • Постоянная доходность — допущение, а не предсказание.")
+            result = monte_carlo(
+                initial,
+                self.rate.value(),
+                self.volatility.value(),
+                self.years.value(),
+                self.simulations.value()
+            )
+            self.output.setText(money(result["average"]))
+            self.details.setText(
+                f"Медиана: {money(result['median'])}    "
+                f"5-й процентиль: {money(result['p5'])}    "
+                f"95-й процентиль: {money(result['p95'])}\n"
+                f"Вероятность закончить ниже начального капитала: "
+                f"{result['loss_probability']:.1f}%"
+            )
+
+            self.axes.clear()
+            self.axes.hist(
+                [value / 100 for value in result["final_values"]],
+                bins=30,
+                edgecolor="white",
+                alpha=0.8
+            )
+            self.axes.set_title("Распределение итогового капитала")
+            self.axes.set_xlabel("Итоговый капитал, ₽")
+            self.axes.set_ylabel("Количество сценариев")
+            self.axes.grid(True, alpha=0.2)
+            self.figure.tight_layout()
+            self.canvas.draw_idle()
+
             with connect() as conn:
-                conn.execute("INSERT INTO simulation_runs(initial_cents,annual_rate,years,final_cents) VALUES(?,?,?,?)",
-                    (initial, self.rate.value(), self.years.value(), result))
+                conn.execute(
+                    "INSERT INTO simulation_runs(initial_cents,annual_rate,years,final_cents) VALUES(?,?,?,?)",
+                    (initial, self.rate.value(), self.years.value(), result["average"])
+                )
         except Exception as exc:
             QMessageBox.warning(self, "Ошибка моделирования", str(exc))
+
 
 class ReportsPage(QWidget):
     def __init__(self):
