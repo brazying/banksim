@@ -50,10 +50,6 @@ class MainWindow(QMainWindow):
             self.nav_buttons.append(button)
             self.stack.addWidget(page)
         side.addStretch()
-        note = QLabel("Учебный симулятор.\nВсе данные вымышлены.")
-        note.setObjectName("Muted")
-        note.setWordWrap(True)
-        side.addWidget(note)
 
         content = QWidget()
         main = QVBoxLayout(content)
