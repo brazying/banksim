@@ -3,8 +3,8 @@ TEXT, MUTED = "#dde0e4", "#8a9097"
 ACCENT, ACCENT_HI = "#6f9bd1", "#9bbbe0"
 UP, DOWN, GOLD = "#5aa97a", "#c9605a", "#c9a24d"
 PIE = ["#6f9bd1", "#5aa97a", "#c9a24d", "#8f7fc4", "#c9605a", "#5fb0b3", "#b08968", "#8a9097"]
-FONT = "'Segoe UI','Helvetica Neue',Arial,sans-serif"
-MONO = "Consolas,'Courier New',monospace"
+FONT = "'Helvetica', Arial, sans-serif"
+MONO = "'Helvetica', Arial, sans-serif"
 
 STYLE = """
 QWidget { color:%(TEXT)s; font-family:%(FONT)s; font-size:13px; }
