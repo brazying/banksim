@@ -223,9 +223,9 @@ class AccountPage(QWidget):
                         shortfall = cents - available
                         QMessageBox.warning(
                             self, "Недостаточно средств",
-                            f"Доступный баланс: {money(available)}\\n"
-                            f"Сумма операции: {money(cents)}\\n"
-                            f"Не хватает: {money(shortfall)}.\\n"
+                            f"Доступный баланс: {money(available)}\n"
+                            f"Сумма операции: {money(cents)}\n"
+                            f"Не хватает: {money(shortfall)}.\n"
                             "Операция не добавлена. Сначала пополни счёт."
                         )
                         return
@@ -629,10 +629,10 @@ class StockMarketPage(QWidget):
                     if cash < total:
                         shortfall = total - cash
                         raise ValueError(
-                            f"Недостаточно средств для покупки.\\n"
-                            f"Стоимость покупки: {money(total)}\\n"
-                            f"Текущий баланс: {money(cash)}\\n"
-                            f"Не хватает: {money(shortfall)}.\\n"
+                            f"Недостаточно средств для покупки.\n"
+                            f"Стоимость покупки: {money(total)}\n"
+                            f"Текущий баланс: {money(cash)}\n"
+                            f"Не хватает: {money(shortfall)}.\n"
                             "Пополните счёт и повторите покупку."
                         )
                     old_qty = held
