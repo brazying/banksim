@@ -8,7 +8,7 @@ from theme import STYLE
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("LEDGER — финансовый симулятор")
+        self.setWindowTitle("bankSim — финансовый симулятор")
         self.resize(1240, 800)
         central = QWidget()
         central.setObjectName("Root")
@@ -23,7 +23,7 @@ class MainWindow(QMainWindow):
         side.setContentsMargins(0, 22, 0, 18)
         side.setSpacing(0)
 
-        brand = QLabel("Ledger")
+        brand = QLabel("bankSim")
         brand.setObjectName("Brand")
         side.addWidget(brand)
         side.addSpacing(20)
