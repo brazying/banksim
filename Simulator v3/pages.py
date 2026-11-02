@@ -317,7 +317,7 @@ class DepositPage(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.addLayout(heading("Калькулятор вклада", "Сложные проценты / учебный расчёт"))
+        layout.addLayout(heading("Калькулятор вклада", ""))
         box = QGroupBox("Параметры")
         form = QFormLayout(box)
         self.principal = QDoubleSpinBox()
@@ -370,7 +370,7 @@ class SimulationPage(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.addLayout(heading("Моделирование", "Детерминированный прогноз и Monte Carlo"))
+        layout.addLayout(heading("Моделирование", ""))
 
         box = QGroupBox("Параметры симуляции")
         form = QFormLayout(box)
@@ -424,12 +424,6 @@ class SimulationPage(QWidget):
         self.axes = self.figure.add_subplot(111)
         style_axes(self.axes)
         layout.addWidget(self.canvas, 1)
-
-        note = QLabel("Модель использует случайные годовые доходности с логнормальным распределением. "
-                      "Это учебный сценарный расчёт, а не прогноз реальной доходности.")
-        note.setWordWrap(True)
-        note.setStyleSheet("color: #8a9097;")
-        layout.addWidget(note)
 
     def run_projection(self):
         try:
@@ -501,7 +495,7 @@ class StockMarketPage(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.addLayout(heading("Рынок акций", "Учебная биржа: котировки меняются автоматически, реальные деньги не используются"))
+        layout.addLayout(heading("Рынок акций", ""))
         summary = QHBoxLayout()
         self.cash_label = QLabel("Доступно: —")
         self.cash_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #dde0e4; font-family: Consolas, 'Courier New';")
