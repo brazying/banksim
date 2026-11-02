@@ -630,10 +630,7 @@ class StockMarketPage(QWidget):
                         shortfall = total - cash
                         raise ValueError(
                             f"Недостаточно средств для покупки.\n"
-                            f"Стоимость покупки: {money(total)}\n"
-                            f"Текущий баланс: {money(cash)}\n"
-                            f"Не хватает: {money(shortfall)}.\n"
-                            "Пополните счёт и повторите покупку."
+                            f"Не хватает: {money(shortfall)}."
                         )
                     old_qty = held
                     new_qty = round(old_qty + quantity, 4)
