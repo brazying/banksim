@@ -104,6 +104,35 @@ def signed(row):
     plus = row["tx_type"] in ("Income", "Deposit")
     return ("+" if plus else "−") + money(row["amount_cents"])
 
+def operation_rows(conn):
+    rows = []
+    transactions = conn.execute("SELECT * FROM transactions").fetchall()
+    trades = conn.execute("SELECT * FROM trades").fetchall()
+
+    for row in transactions:
+        plus = row["tx_type"] in ("Income", "Deposit")
+        rows.append({
+            "date": row["tx_date"], "id": row["id"], "source": 0,
+            "type": TRANSACTION_LABELS.get(row["tx_type"], row["tx_type"]),
+            "category": row["category"], "description": row["description"],
+            "amount": ("+" if plus else "−") + money(row["amount_cents"]),
+            "delta": row["amount_cents"] if plus else -row["amount_cents"],
+        })
+
+    for row in trades:
+        is_sale = row["side"] == "SELL"
+        action = "Продажа акций" if is_sale else "Покупка акций"
+        rows.append({
+            "date": row["trade_date"], "id": row["id"], "source": 1,
+            "type": action, "category": "Биржа",
+            "description": f"{row['ticker']} · {row['quantity']:.2f} шт. по {money(row['price_cents'])}",
+            "amount": ("+" if is_sale else "−") + money(row["total_cents"]),
+            "delta": row["total_cents"] if is_sale else -row["total_cents"],
+        })
+
+    rows.sort(key=lambda item: (item["date"], item["id"], item["source"]), reverse=True)
+    return rows
+
 
 class DashboardPage(QWidget):
     def __init__(self):
@@ -139,12 +168,12 @@ class DashboardPage(QWidget):
 
     def refresh(self):
         with connect() as conn:
-            rows = conn.execute("SELECT * FROM transactions ORDER BY id DESC LIMIT 8").fetchall()
+            rows = operation_rows(conn)[:8]
             income = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type IN ('Income','Deposit')").fetchone()[0]
             expense = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type IN ('Expense','Withdrawal')").fetchone()[0]
             assets = conn.execute("SELECT name, quantity, current_price_cents FROM assets UNION ALL SELECT s.name || ' (' || s.ticker || ')', h.quantity, s.price_cents FROM holdings h JOIN stocks s ON s.ticker=h.ticker WHERE h.quantity > 0").fetchall()
             trade_cash = conn.execute("SELECT COALESCE(SUM(CASE WHEN side='SELL' THEN total_cents ELSE -total_cents END),0) FROM trades").fetchone()[0]
-            all_transactions = conn.execute("SELECT tx_date, tx_type, amount_cents FROM transactions ORDER BY tx_date, id").fetchall()
+            all_operations = operation_rows(conn)
         balance = income - expense + trade_cash
         portfolio = sum(int(row["quantity"] * row["current_price_cents"]) for row in assets)
         self.balance.value_label.setText(money(balance))
@@ -152,10 +181,9 @@ class DashboardPage(QWidget):
         self.net.value_label.setText(money(balance + portfolio))
         running = 0
         by_date = {}
-        for tx in all_transactions:
-            delta = tx["amount_cents"] if tx["tx_type"] in ("Income", "Deposit") else -tx["amount_cents"]
-            running += delta
-            by_date[tx["tx_date"]] = running
+        for operation in reversed(all_operations):
+            running += operation["delta"]
+            by_date[operation["date"]] = running
         labels = list(by_date.keys())[-30:]
         values = [by_date[key] / 100 for key in labels]
         self.capital_chart.plot_capital(labels, values)
@@ -165,7 +193,7 @@ class DashboardPage(QWidget):
         )
         self.table.setRowCount(len(rows))
         for r, row in enumerate(rows):
-            vals = [row["tx_date"], TRANSACTION_LABELS.get(row["tx_type"], row["tx_type"]), row["category"], row["description"], signed(row)]
+            vals = [row["date"], row["type"], row["category"], row["description"], row["amount"]]
             for c, value in enumerate(vals):
                 put(self.table, r, c, value)
 
@@ -241,14 +269,14 @@ class AccountPage(QWidget):
 
     def refresh(self):
         with connect() as conn:
-            rows = conn.execute("SELECT * FROM transactions ORDER BY id DESC").fetchall()
+            rows = operation_rows(conn)
             income = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type IN ('Income','Deposit')").fetchone()[0]
             expense = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type IN ('Expense','Withdrawal')").fetchone()[0]
             trade_cash = conn.execute("SELECT COALESCE(SUM(CASE WHEN side='SELL' THEN total_cents ELSE -total_cents END),0) FROM trades").fetchone()[0]
         self.balance_label.setText(f"Текущий баланс: {money(income - expense + trade_cash)}")
         self.table.setRowCount(len(rows))
         for r, row in enumerate(rows):
-            vals = [row["tx_date"], TRANSACTION_LABELS.get(row["tx_type"], row["tx_type"]), row["category"], row["description"], signed(row)]
+            vals = [row["date"], row["type"], row["category"], row["description"], row["amount"]]
             for c, value in enumerate(vals):
                 put(self.table, r, c, value)
 
