@@ -212,9 +212,25 @@ class AccountPage(QWidget):
             return
         try:
             cents = to_cents(self.amount.value())
+            tx_type = self.kind.currentData()
             with connect() as conn:
+                if tx_type in ("Expense", "Withdrawal"):
+                    income = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type IN ('Income','Deposit')").fetchone()[0]
+                    expense = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type IN ('Expense','Withdrawal')").fetchone()[0]
+                    trade_cash = conn.execute("SELECT COALESCE(SUM(CASE WHEN side='SELL' THEN total_cents ELSE -total_cents END),0) FROM trades").fetchone()[0]
+                    available = income - expense + trade_cash
+                    if available < cents:
+                        shortfall = cents - available
+                        QMessageBox.warning(
+                            self, "Недостаточно средств",
+                            f"Доступный баланс: {money(available)}\\n"
+                            f"Сумма операции: {money(cents)}\\n"
+                            f"Не хватает: {money(shortfall)}.\\n"
+                            "Операция не добавлена. Сначала пополни счёт."
+                        )
+                        return
                 conn.execute("INSERT INTO transactions(tx_date,tx_type,category,description,amount_cents) VALUES(?,?,?,?,?)",
-                    (date.today().isoformat(), self.kind.currentData(), category, self.description.text().strip(), cents))
+                    (date.today().isoformat(), tx_type, category, self.description.text().strip(), cents))
             self.category.clear()
             self.description.clear()
             self.amount.setValue(0.01)
@@ -611,7 +627,14 @@ class StockMarketPage(QWidget):
                 held = holding["quantity"] if holding else 0.0
                 if side == "BUY":
                     if cash < total:
-                        raise ValueError(f"Недостаточно денег. Доступно: {money(cash)}, нужно: {money(total)}.")
+                        shortfall = total - cash
+                        raise ValueError(
+                            f"Недостаточно средств для покупки.\\n"
+                            f"Стоимость покупки: {money(total)}\\n"
+                            f"Текущий баланс: {money(cash)}\\n"
+                            f"Не хватает: {money(shortfall)}.\\n"
+                            "Пополните счёт и повторите покупку."
+                        )
                     old_qty = held
                     new_qty = round(old_qty + quantity, 4)
                     old_cost = old_qty * (holding["average_price_cents"] if holding else 0)
