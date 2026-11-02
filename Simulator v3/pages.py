@@ -33,10 +33,6 @@ def heading(text, subtitle=""):
     title = QLabel(text)
     title.setObjectName("PageTitle")
     box.addWidget(title)
-    if subtitle:
-        sub = QLabel(subtitle)
-        sub.setObjectName("PageSub")
-        box.addWidget(sub)
     return box
 
 def section(text):
