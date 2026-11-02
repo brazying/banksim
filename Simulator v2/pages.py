@@ -114,7 +114,7 @@ class AccountPage(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.addLayout(heading("БАНКОВСКИЙ СЧЁТ", "Учёт доходов, расходов и движения денег"))
+        layout.addLayout(heading("БАНКОВСКИЙ СЧЁТ", ""))
         self.balance_label = QLabel("Текущий баланс: —")
         self.balance_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #73e0bd; padding: 4px 0;")
         layout.addWidget(self.balance_label)
@@ -183,7 +183,7 @@ class PortfolioPage(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.addLayout(heading("ПОРТФЕЛЬ", "Список активов и их стоимость"))
+        layout.addLayout(heading("ПОРТФЕЛЬ", ""))
         box = QGroupBox("ДОБАВИТЬ / ОБНОВИТЬ АКТИВ")
         form = QFormLayout(box)
         self.name = QLineEdit()
@@ -413,7 +413,7 @@ class ReportsPage(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.addLayout(heading("ОТЧЁТЫ", "Сводка по сохранённым данным"))
+        layout.addLayout(heading("ОТЧЁТЫ", ""))
         self.summary = QLabel("")
         self.summary.setStyleSheet("font-size: 14px; line-height: 1.5;")
         layout.addWidget(self.summary)
