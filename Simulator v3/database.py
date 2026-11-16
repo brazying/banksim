@@ -1,6 +1,6 @@
 import sqlite3
 from pathlib import Path
-from datetime import date
+from datetime import date, datetime
 import calendar
 
 
@@ -167,6 +167,24 @@ def init_db():
                     )
                     positions[trade["ticker"]] = (max(0.0, qty - trade["quantity"]), average)
 
+        bond_trade_columns = {row["name"] for row in conn.execute("PRAGMA table_info(bond_trades)")}
+        if "realized_pnl_cents" not in bond_trade_columns:
+            conn.execute("ALTER TABLE bond_trades ADD COLUMN realized_pnl_cents INTEGER NOT NULL DEFAULT 0")
+            positions = {}
+            legacy_bond_trades = conn.execute(
+                "SELECT id,ticker,side,quantity,price_cents FROM bond_trades ORDER BY trade_date,id"
+            ).fetchall()
+            for trade in legacy_bond_trades:
+                qty, average = positions.get(trade["ticker"], (0.0, 0.0))
+                if trade["side"] == "BUY":
+                    new_qty = qty + trade["quantity"]
+                    new_average = ((qty * average + trade["quantity"] * trade["price_cents"]) / new_qty) if new_qty else 0.0
+                    positions[trade["ticker"]] = (new_qty, new_average)
+                else:
+                    realized = int(round(trade["quantity"] * (trade["price_cents"] - average)))
+                    conn.execute("UPDATE bond_trades SET realized_pnl_cents=? WHERE id=?", (realized, trade["id"]))
+                    positions[trade["ticker"]] = (max(0.0, qty - trade["quantity"]), average)
+
         stocks = [
             ("AAPL", "Apple Inc.", 23_000, 23_000, 0.010),
             ("MSFT", "Microsoft Corp.", 42_000, 42_000, 0.009),
@@ -227,7 +245,8 @@ def init_db():
             ("CORP-MTS","МТС 001Р","Корпоративная",1_000,987,987,10.1,2,0.0025),
             ("CORP-YNDX","Яндекс 001Р","Корпоративная",1_000,1_004,1_004,9.6,4,0.0024),
         ]
-        today = date.today()
+        clock_row = conn.execute("SELECT simulated_at FROM market_clock WHERE id=1").fetchone()
+        today = datetime.fromisoformat(clock_row["simulated_at"]).date()
         for ticker,name,kind,face,price,prev,coupon,term,vol in bond_rows:
             maturity = add_months(today, term * 12)
             next_coupon = add_months(today, 6)
@@ -247,9 +266,16 @@ def init_db():
         record_financial_snapshot(conn)
 
 
+def simulated_datetime(conn):
+    """Текущее единое время симулятора (15 секунд реального времени = 1 час симуляции)."""
+    row = conn.execute("SELECT simulated_at FROM market_clock WHERE id=1").fetchone()
+    if row is None:
+        raise RuntimeError("Симулируемые часы ещё не инициализированы.")
+    return datetime.fromisoformat(row["simulated_at"])
+
+
 def record_financial_snapshot(conn):
-    """Сохранить согласованный снимок денежных средств и рыночной стоимости активов."""
-    from datetime import datetime
+    """Сохранить снимок капитала с отметкой единого симулируемого времени."""
 
     income = conn.execute(
         "SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type IN ('Income','Deposit')"
@@ -292,7 +318,10 @@ def record_financial_snapshot(conn):
     """).fetchone()[0]
     portfolio_cost = int(manual["cost"] + market["cost"] + bonds_cost)
     portfolio_value = int(manual["value"] + market["value"] + bonds_value)
-    captured_at = datetime.now().isoformat(timespec="microseconds")
+    captured_at = simulated_datetime(conn).isoformat(timespec="seconds")
+    # Один снимок на один симулируемый час: повторные действия в тот же час
+    # обновляют его, а не создают дубли.
+    conn.execute("DELETE FROM financial_snapshots WHERE captured_at=?", (captured_at,))
     conn.execute(
         """INSERT INTO financial_snapshots(
                captured_at,cash_cents,portfolio_cost_cents,portfolio_value_cents,net_worth_cents
