@@ -134,10 +134,10 @@ def monte_carlo_price_step(
     daily_volatility: float,
     annual_return_percent: float = 8.0,
 ) -> int:
-    """Смоделировать один торговый день цены по геометрическому броуновскому движению.
+    """Смоделировать один симулируемый час движения цены.
 
-    Один вызов соответствует одному условному торговому дню симулятора.
-    daily_volatility задаётся как дневное стандартное отклонение (например, 0.01 = 1%).
+    daily_volatility — прежняя дневная волатильность акции; она переводится
+    в часовую с учётом 252 торговых дней и 365 календарных дней в году.
     """
     import math
     import random
@@ -149,13 +149,12 @@ def monte_carlo_price_step(
     if not -99 <= annual_return_percent <= 100:
         raise ValueError("Ожидаемая годовая доходность должна быть от -99 до 100%.")
 
-    daily_drift = (annual_return_percent / 100) / 252
+    hours_per_year = 365 * 24
+    annual_volatility = daily_volatility * math.sqrt(252)
+    hourly_volatility = annual_volatility / math.sqrt(hours_per_year)
+    hourly_drift = (annual_return_percent / 100 - 0.5 * annual_volatility ** 2) / hours_per_year
     random_shock = random.gauss(0, 1)
-    log_return = (
-        daily_drift
-        - 0.5 * daily_volatility ** 2
-        + daily_volatility * random_shock
-    )
+    log_return = hourly_drift + hourly_volatility * random_shock
     return max(1, int(round(price_cents * math.exp(log_return))))
 
 
