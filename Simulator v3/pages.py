@@ -586,7 +586,8 @@ class ReportsPage(QWidget):
         self.invested_metric = metric("Вложено в портфель", "—")
         self.value_metric = metric("Текущая стоимость портфеля", "—")
         self.pnl_metric = metric("Прибыль / убыток по открытым позициям", "—")
-        for item in (self.invested_metric, self.value_metric, self.pnl_metric):
+        self.realized_metric = metric("Результат закрытых сделок", "—")
+        for item in (self.invested_metric, self.value_metric, self.pnl_metric, self.realized_metric):
             metrics_bottom.addWidget(item, 1)
         layout.addLayout(metrics_bottom)
 
@@ -606,6 +607,14 @@ class ReportsPage(QWidget):
         charts.addWidget(flow_box, 3)
         charts.addWidget(category_box, 2)
         layout.addLayout(charts)
+
+        history_box = QGroupBox("История общего капитала и портфеля")
+        history_layout = QVBoxLayout(history_box)
+        self.history_figure = Figure(figsize=(9, 3), dpi=90, facecolor=SURFACE)
+        self.history_canvas = FigureCanvas(self.history_figure)
+        self.history_axes = self.history_figure.add_subplot(111)
+        history_layout.addWidget(self.history_canvas)
+        layout.addWidget(history_box)
 
         layout.addWidget(section("Сводка по типам операций"))
         self.breakdown = QTableWidget(0, 3)
@@ -725,13 +734,57 @@ class ReportsPage(QWidget):
         self.category_figure.tight_layout()
         self.category_canvas.draw_idle()
 
+    def _draw_history_chart(self, snapshots):
+        ax = self.history_axes
+        ax.clear()
+        ax.set_facecolor(SURFACE)
+        # Для читаемости показываем последний согласованный снимок каждого дня.
+        daily = {}
+        for row in snapshots:
+            daily[row["captured_at"][:10]] = row
+        dates = sorted(daily)
+        if not dates:
+            ax.text(0.5, 0.5, "История капитала начнёт накапливаться после изменений в счёте или портфеле",
+                    color=MUTED, ha="center", va="center", transform=ax.transAxes)
+            style_axes(ax)
+            ax.set_xticks([])
+            self.history_canvas.draw_idle()
+            return
+        x = list(range(len(dates)))
+        net_worth = [daily[key]["net_worth_cents"] / 100 for key in dates]
+        portfolio = [daily[key]["portfolio_value_cents"] / 100 for key in dates]
+        ax.plot(x, net_worth, marker="o" if len(x) < 20 else None,
+                linewidth=2, color=ACCENT, label="Общий капитал")
+        ax.plot(x, portfolio, marker="o" if len(x) < 20 else None,
+                linewidth=1.6, color=UP, label="Портфель")
+        ax.set_xticks(x)
+        step = max(1, len(dates) // 10)
+        ax.set_xticklabels([d if i % step == 0 or i == len(dates)-1 else ""
+                            for i, d in enumerate(dates)],
+                           rotation=30, ha="right", color=MUTED, fontsize=8)
+        ax.yaxis.set_major_formatter(lambda value, _pos: f"{value:,.0f}".replace(",", " "))
+        ax.legend(frameon=False, labelcolor=MUTED, fontsize=8)
+        ax.set_ylabel("Рубли", color=MUTED, fontsize=8)
+        style_axes(ax)
+        self.history_figure.tight_layout()
+        self.history_canvas.draw_idle()
+
     def refresh(self):
+        start = self._period_start()
         with connect() as conn:
             all_operations = operation_rows(conn)
             balance = cash_balance(conn)
             cost, portfolio_value = self._portfolio_totals(conn)
+            snapshots = conn.execute(
+                "SELECT * FROM financial_snapshots ORDER BY captured_at"
+            ).fetchall()
+            realized_query = "SELECT COALESCE(SUM(realized_pnl_cents),0) FROM trades"
+            realized_params = ()
+            if start is not None:
+                realized_query += " WHERE trade_date >= ?"
+                realized_params = (start,)
+            realized_pnl = conn.execute(realized_query, realized_params).fetchone()[0]
 
-        start = self._period_start()
         operations = [
             row for row in all_operations
             if start is None or row["date"] >= start
@@ -748,6 +801,9 @@ class ReportsPage(QWidget):
         self.invested_metric.value_label.setText(money(cost))
         self.value_metric.value_label.setText(money(portfolio_value))
         self.pnl_metric.value_label.setText(("+" if pnl > 0 else "") + money(pnl))
+        self.realized_metric.value_label.setText(
+            ("+" if realized_pnl > 0 else "") + money(realized_pnl)
+        )
 
         grouped = {}
         for row in operations:
@@ -769,6 +825,11 @@ class ReportsPage(QWidget):
 
         self._draw_flow_chart(operations)
         self._draw_category_chart(operations)
+        filtered_snapshots = [
+            row for row in snapshots
+            if start is None or row["captured_at"][:10] >= start
+        ]
+        self._draw_history_chart(filtered_snapshots)
 
 
 class StockMarketPage(QWidget):
