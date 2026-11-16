@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushBut
 from PyQt6.QtCore import Qt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-from database import connect, record_financial_snapshot, simulated_datetime, cash_balance
+from database import connect, record_financial_snapshot, simulated_datetime, cash_balance, portfolio_totals
 from finance import to_cents, money, compound_interest, projected_value, monte_carlo, monte_carlo_price_step, monte_carlo_capital
 from charts import CapitalChart, AllocationChart, style_axes
 from theme import *
@@ -208,27 +208,12 @@ class DashboardPage(QWidget):
             snapshots = conn.execute(
                 "SELECT captured_at, net_worth_cents FROM financial_snapshots ORDER BY captured_at"
             ).fetchall()
-            assets = conn.execute("""
-                SELECT a.name AS name, a.quantity AS quantity,
-                       a.current_price_cents AS current_price_cents
-                FROM assets a
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM holdings h
-                    WHERE h.ticker = UPPER(a.ticker) AND h.quantity > 0
-                )
-                UNION ALL
-                SELECT s.name || ' (' || s.ticker || ')' AS name,
-                       h.quantity AS quantity,
-                       s.price_cents AS current_price_cents
-                FROM holdings h JOIN stocks s ON s.ticker = h.ticker
-                WHERE h.quantity > 0
-                UNION ALL
-                SELECT b.name || ' (' || b.ticker || ')' AS name,
-                       h.quantity AS quantity, b.price_cents AS current_price_cents
-                FROM bond_holdings h JOIN bonds b ON b.ticker=h.ticker
-                WHERE h.quantity > 0
-            """).fetchall()
-        portfolio = sum(int(round(row["quantity"] * row["current_price_cents"])) for row in assets)
+            positions, _, portfolio = portfolio_totals(conn)
+        assets = [
+            {"name": name + (f" ({ticker})" if ticker else ""),
+             "quantity": quantity, "current_price_cents": current}
+            for name, ticker, quantity, _, current, _ in positions
+        ]
         self.balance.value_label.setText(money(balance))
         self.portfolio.value_label.setText(money(portfolio))
         self.net.value_label.setText(money(balance + portfolio))
@@ -392,39 +377,11 @@ class PortfolioPage(QWidget):
 
     def refresh(self):
         with connect() as conn:
-            manual = conn.execute("SELECT * FROM assets ORDER BY name").fetchall()
-            market = conn.execute("""
-                SELECT s.name, h.ticker, h.quantity, h.average_price_cents, s.price_cents
-                FROM holdings h JOIN stocks s ON s.ticker=h.ticker
-                WHERE h.quantity > 0 ORDER BY h.ticker
-            """).fetchall()
-            bonds = conn.execute("""
-                SELECT b.name,b.ticker,h.quantity,h.average_price_cents,b.price_cents
-                FROM bond_holdings h JOIN bonds b ON b.ticker=h.ticker
-                WHERE h.quantity>0 ORDER BY b.ticker
-            """).fetchall()
+            positions, _, _ = portfolio_totals(conn)
 
-        # Биржевые позиции являются основным источником для тикеров,
-        # уже купленных через рынок; не дублируем их ручными активами.
-        market_tickers = {row["ticker"].upper() for row in market}
-        rows = [
-            (row["name"], row["ticker"], row["quantity"], row["average_price_cents"],
-             row["current_price_cents"])
-            for row in manual
-            if not row["ticker"] or row["ticker"].upper() not in market_tickers
-        ]
-        rows.extend(
-            (row["name"], row["ticker"], row["quantity"], row["average_price_cents"], row["price_cents"])
-            for row in market
-        )
-        rows.extend(
-            (row["name"] + " · облигация", row["ticker"], row["quantity"], row["average_price_cents"], row["price_cents"])
-            for row in bonds
-        )
-
-        self.table.setRowCount(len(rows))
-        for r, row in enumerate(rows):
-            name, ticker, qty, avg_price, current_price = row
+        self.table.setRowCount(len(positions))
+        for r, row in enumerate(positions):
+            name, ticker, qty, avg_price, current_price, _kind = row
             current_value = int(round(qty * current_price))
             cost_value = int(round(qty * avg_price))
             pnl = current_value - cost_value
@@ -433,7 +390,6 @@ class PortfolioPage(QWidget):
                     ("+" if pnl > 0 else "") + money(pnl), f"{pnl_pct:+.2f}%"]
             for c, value in enumerate(vals):
                 put(self.table, r, c, value)
-
 
 class BondsPage(QWidget):
     """Учебный рынок облигаций с плавающей рыночной ценой и полугодовыми купонами."""
@@ -738,24 +694,7 @@ class SimulationPage(QWidget):
     def refresh_live_values(self):
         with connect() as conn:
             self._cash_cents = cash_balance(conn)
-            manual = conn.execute("""
-                SELECT COALESCE(SUM(CAST(ROUND(a.quantity*a.current_price_cents) AS INTEGER)),0)
-                FROM assets a
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM holdings h
-                    WHERE h.ticker=UPPER(a.ticker) AND h.quantity>0
-                )
-            """).fetchone()[0]
-            market = conn.execute("""
-                SELECT COALESCE(SUM(CAST(ROUND(h.quantity*s.price_cents) AS INTEGER)),0)
-                FROM holdings h JOIN stocks s ON s.ticker=h.ticker
-                WHERE h.quantity>0
-            """).fetchone()[0]
-            bonds = conn.execute("""
-                SELECT COALESCE(SUM(CAST(ROUND(h.quantity*b.price_cents) AS INTEGER)),0)
-                FROM bond_holdings h JOIN bonds b ON b.ticker=h.ticker WHERE h.quantity>0
-            """).fetchone()[0]
-            self._portfolio_cents = int(manual + market + bonds)
+            _, _, self._portfolio_cents = portfolio_totals(conn)
         total = self._cash_cents + self._portfolio_cents
         self.cash_value.value_label.setText(money(self._cash_cents))
         self.portfolio_value.value_label.setText(money(self._portfolio_cents))
@@ -951,33 +890,7 @@ class ReportsPage(QWidget):
         return (today - timedelta(days=days - 1)).isoformat()
 
     def _portfolio_data(self, conn):
-        manual = conn.execute("SELECT * FROM assets ORDER BY name").fetchall()
-        stocks = conn.execute("""
-            SELECT h.ticker,h.quantity,h.average_price_cents,s.price_cents,s.name
-            FROM holdings h JOIN stocks s ON s.ticker=h.ticker
-            WHERE h.quantity>0 ORDER BY h.ticker
-        """).fetchall()
-        stock_tickers = {row["ticker"].upper() for row in stocks}
-        bonds = conn.execute("""
-            SELECT h.ticker,h.quantity,h.average_price_cents,b.price_cents,b.name
-            FROM bond_holdings h JOIN bonds b ON b.ticker=h.ticker
-            WHERE h.quantity>0 ORDER BY h.ticker
-        """).fetchall()
-
-        positions = []
-        for row in manual:
-            if row["ticker"] and row["ticker"].upper() in stock_tickers:
-                continue
-            positions.append((row["name"], row["quantity"], row["average_price_cents"],
-                              row["current_price_cents"], "Ручной актив"))
-        positions.extend((row["ticker"] + " · " + row["name"], row["quantity"],
-                          row["average_price_cents"], row["price_cents"], "Акции") for row in stocks)
-        positions.extend((row["ticker"] + " · " + row["name"], row["quantity"],
-                          row["average_price_cents"], row["price_cents"], "Облигации") for row in bonds)
-
-        cost = sum(int(round(qty * avg)) for _, qty, avg, _, _ in positions)
-        value = sum(int(round(qty * current)) for _, qty, _, current, _ in positions)
-        return positions, cost, value
+        return portfolio_totals(conn)
 
     def _draw_flow(self, operations):
         monthly = {}
