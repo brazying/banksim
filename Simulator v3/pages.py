@@ -556,14 +556,46 @@ class ReportsPage(QWidget):
 
     def refresh(self):
         with connect() as conn:
-            rows = conn.execute("""SELECT tx_type, COUNT(*) AS n, SUM(amount_cents) AS total
-                FROM transactions GROUP BY tx_type ORDER BY tx_type""").fetchall()
-            income = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type='Income'").fetchone()[0]
-            expense = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type='Expense'").fetchone()[0]
-        self.summary.setText(f"Доходы: {money(income)}     Расходы: {money(expense)}     Чистый поток: {money(income-expense)}")
+            rows = conn.execute("""
+                SELECT tx_type AS operation, COUNT(*) AS n,
+                       COALESCE(SUM(amount_cents), 0) AS total
+                FROM transactions
+                GROUP BY tx_type
+                UNION ALL
+                SELECT CASE side
+                           WHEN 'BUY' THEN 'StockPurchase'
+                           ELSE 'StockSale'
+                       END AS operation,
+                       COUNT(*) AS n, COALESCE(SUM(total_cents), 0) AS total
+                FROM trades
+                GROUP BY side
+                ORDER BY operation
+            """).fetchall()
+            income = conn.execute("""
+                SELECT COALESCE(SUM(amount_cents), 0)
+                FROM transactions
+                WHERE tx_type IN ('Income', 'Deposit')
+            """).fetchone()[0]
+            expense = conn.execute("""
+                SELECT COALESCE(SUM(amount_cents), 0)
+                FROM transactions
+                WHERE tx_type IN ('Expense', 'Withdrawal')
+            """).fetchone()[0]
+            balance = cash_balance(conn)
+        labels = {
+            **TRANSACTION_LABELS,
+            "StockPurchase": "Покупка акций",
+            "StockSale": "Продажа акций",
+        }
+        self.summary.setText(
+            f"Доходы и пополнения: {money(income)}     "
+            f"Расходы и снятия: {money(expense)}     "
+            f"Денежный баланс с учётом биржи: {money(balance)}"
+        )
         self.table.setRowCount(len(rows))
         for r, row in enumerate(rows):
-            vals = [TRANSACTION_LABELS.get(row["tx_type"], row["tx_type"]), row["n"], money(row["total"] or 0)]
+            vals = [labels.get(row["operation"], row["operation"]),
+                    row["n"], money(row["total"] or 0)]
             for c, value in enumerate(vals):
                 put(self.table, r, c, value)
 
