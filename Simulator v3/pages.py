@@ -324,7 +324,7 @@ class AccountPage(QWidget):
                             "Операция не добавлена. Сначала пополни счёт."
                         )
                         return
-                tx_date = simulated_datetime(conn).date().isoformat()
+                tx_date = simulated_datetime(conn).isoformat(timespec="seconds")
                 conn.execute("INSERT INTO transactions(tx_date,tx_type,category,description,amount_cents) VALUES(?,?,?,?,?)",
                     (tx_date, tx_type, category, self.description.text().strip(), cents))
                 record_financial_snapshot(conn)
@@ -572,7 +572,7 @@ class BondsPage(QWidget):
             rows=conn.execute("SELECT ticker,price_cents,volatility FROM bonds").fetchall()
             for bond in rows:
                 # Небольшое ежедневное изменение цены; размер купона от этого не меняется.
-                shock=random.gauss(0,bond["volatility"])
+                shock=random.gauss(0,bond["volatility"] / (24 ** 0.5))
                 new_price=max(1,int(round(bond["price_cents"]*(1+shock))))
                 conn.execute("UPDATE bonds SET previous_price_cents=price_cents,price_cents=? WHERE ticker=?",
                              (new_price,bond["ticker"]))
@@ -589,7 +589,8 @@ class BondsPage(QWidget):
         try:
             with connect() as conn:
                 bond=conn.execute("SELECT * FROM bonds WHERE ticker=?",(ticker,)).fetchone()
-                if not bond or bond["maturity_date"] <= date.today().isoformat():
+                simulated_today = simulated_datetime(conn).date().isoformat()
+                if not bond or bond["maturity_date"] <= simulated_today:
                     raise ValueError("Срок обращения этого выпуска завершён.")
                 holding=conn.execute("SELECT * FROM bond_holdings WHERE ticker=?",(ticker,)).fetchone()
                 price=bond["price_cents"]
@@ -606,7 +607,7 @@ class BondsPage(QWidget):
                     avg=holding["average_price_cents"] if new_qty else 0
                 conn.execute("UPDATE bond_holdings SET quantity=?,average_price_cents=? WHERE ticker=?",
                              (new_qty,avg,ticker))
-                trade_date = simulated_datetime(conn).date().isoformat()
+                trade_date = simulated_datetime(conn).isoformat(timespec="seconds")
                 realized_pnl = int(round(qty * (price - holding["average_price_cents"]))) if side == "SELL" else 0
                 conn.execute(
                     """INSERT INTO bond_trades(
@@ -1385,7 +1386,7 @@ class StockMarketPage(QWidget):
                     """INSERT INTO trades(
                            trade_date,ticker,side,quantity,price_cents,total_cents,realized_pnl_cents
                        ) VALUES(?,?,?,?,?,?,?)""",
-                    (simulated_datetime(conn).date().isoformat(), ticker, side, quantity, price, total, realized_pnl)
+                    (simulated_datetime(conn).isoformat(timespec="seconds"), ticker, side, quantity, price, total, realized_pnl)
                 )
                 record_financial_snapshot(conn)
             action = "Куплено" if side == "BUY" else "Продано"
