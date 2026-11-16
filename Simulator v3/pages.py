@@ -1,8 +1,8 @@
-from datetime import date
+from datetime import date, timedelta
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTableWidget,
     QTableWidgetItem, QHeaderView, QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox, QFormLayout,
-    QMessageBox, QGroupBox, QFrame)
+    QMessageBox, QGroupBox, QFrame, QScrollArea)
 from PyQt6.QtCore import Qt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
@@ -540,63 +540,224 @@ class SimulationPage(QWidget):
 
 
 class ReportsPage(QWidget):
+    """Аналитика, построенная непосредственно по истории операций и портфелю."""
     def __init__(self):
         super().__init__()
-        layout = QVBoxLayout(self)
-        layout.addLayout(heading("Отчёты", ""))
-        self.summary = QLabel("")
-        self.summary.setStyleSheet("font-size: 14px; line-height: 1.5;")
-        layout.addWidget(self.summary)
-        self.table = QTableWidget(0, 3)
-        self.table.setHorizontalHeaderLabels(["Тип", "Количество", "Итого"])
-        configure_table(self.table)
-        layout.addWidget(wrap(self.table))
-        layout.addStretch()
+        outer = QVBoxLayout(self)
+        outer.addLayout(heading("Отчёты", "Финансовая аналитика по операциям и инвестициям"))
+
+        filter_row = QHBoxLayout()
+        filter_row.addWidget(QLabel("Период отчёта"))
+        self.period = QComboBox()
+        self.period.addItem("Всё время", 0)
+        self.period.addItem("Последние 30 дней", 30)
+        self.period.addItem("Последние 90 дней", 90)
+        self.period.addItem("Последние 12 месяцев", 365)
+        self.period.addItem("Текущий год", -1)
+        self.period.setCurrentIndex(0)
+        self.period.currentIndexChanged.connect(lambda _=None: self.refresh())
+        filter_row.addWidget(self.period)
+        filter_row.addStretch()
+        outer.addLayout(filter_row)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        outer.addWidget(scroll, 1)
+        body = QWidget()
+        scroll.setWidget(body)
+        layout = QVBoxLayout(body)
+        layout.setContentsMargins(0, 8, 8, 8)
+        layout.setSpacing(12)
+
+        metrics = QHBoxLayout()
+        self.income_metric = metric("Поступления за период", "—")
+        self.expense_metric = metric("Списания за период", "—")
+        self.net_metric = metric("Денежный поток", "—", hero=True)
+        self.balance_metric = metric("Текущий баланс", "—")
+        self.pnl_metric = metric("Прибыль портфеля", "—")
+        for item in (self.income_metric, self.expense_metric, self.net_metric,
+                     self.balance_metric, self.pnl_metric):
+            metrics.addWidget(item, 1)
+        layout.addLayout(metrics)
+
+        charts = QHBoxLayout()
+        flow_box = QGroupBox("Движение денег по месяцам")
+        flow_layout = QVBoxLayout(flow_box)
+        self.flow_figure = Figure(figsize=(7, 3), dpi=90, facecolor=SURFACE)
+        self.flow_canvas = FigureCanvas(self.flow_figure)
+        self.flow_axes = self.flow_figure.add_subplot(111)
+        flow_layout.addWidget(self.flow_canvas)
+        category_box = QGroupBox("Структура списаний по категориям")
+        category_layout = QVBoxLayout(category_box)
+        self.category_figure = Figure(figsize=(5, 3), dpi=90, facecolor=SURFACE)
+        self.category_canvas = FigureCanvas(self.category_figure)
+        self.category_axes = self.category_figure.add_subplot(111)
+        category_layout.addWidget(self.category_canvas)
+        charts.addWidget(flow_box, 3)
+        charts.addWidget(category_box, 2)
+        layout.addLayout(charts)
+
+        layout.addWidget(section("Сводка по типам операций"))
+        self.breakdown = QTableWidget(0, 3)
+        self.breakdown.setHorizontalHeaderLabels(["Тип операции", "Количество", "Сумма"])
+        configure_table(self.breakdown)
+        layout.addWidget(wrap(self.breakdown))
+
+        layout.addWidget(section("История операций за выбранный период"))
+        self.history = QTableWidget(0, 5)
+        self.history.setHorizontalHeaderLabels(["Дата", "Тип", "Категория", "Описание", "Сумма"])
+        configure_table(self.history)
+        layout.addWidget(wrap(self.history))
+
+        self.note = QLabel("Поступления и списания включают банковские операции и сделки с акциями. "
+                           "Текущий баланс и оценка портфеля показывают состояние на сегодня.")
+        self.note.setWordWrap(True)
+        self.note.setObjectName("Muted")
+        layout.addWidget(self.note)
+
+    def _period_start(self):
+        days = self.period.currentData()
+        if days == 0:
+            return None
+        today = date.today()
+        if days == -1:
+            return date(today.year, 1, 1).isoformat()
+        return (today - timedelta(days=days - 1)).isoformat()
+
+    def _portfolio_totals(self, conn):
+        manual = conn.execute("SELECT * FROM assets ORDER BY name").fetchall()
+        market = conn.execute("""
+            SELECT s.name, h.ticker, h.quantity, h.average_price_cents, s.price_cents
+            FROM holdings h JOIN stocks s ON s.ticker=h.ticker
+            WHERE h.quantity > 0 ORDER BY h.ticker
+        """).fetchall()
+        market_tickers = {row["ticker"].upper() for row in market}
+        positions = [
+            (row["quantity"], row["average_price_cents"], row["current_price_cents"])
+            for row in manual
+            if not row["ticker"] or row["ticker"].upper() not in market_tickers
+        ]
+        positions.extend(
+            (row["quantity"], row["average_price_cents"], row["price_cents"])
+            for row in market
+        )
+        cost = sum(int(qty * avg) for qty, avg, _ in positions)
+        value = sum(int(qty * current) for qty, _, current in positions)
+        return cost, value
+
+    def _draw_flow_chart(self, operations):
+        monthly = {}
+        for operation in operations:
+            month = operation["date"][:7]
+            bucket = monthly.setdefault(month, [0, 0])
+            if operation["delta"] >= 0:
+                bucket[0] += operation["delta"]
+            else:
+                bucket[1] += -operation["delta"]
+
+        ax = self.flow_axes
+        ax.clear()
+        ax.set_facecolor(SURFACE)
+        if not monthly:
+            ax.text(0.5, 0.5, "Нет операций за выбранный период",
+                    color=MUTED, ha="center", va="center", transform=ax.transAxes)
+            style_axes(ax)
+            ax.set_xticks([])
+            self.flow_canvas.draw_idle()
+            return
+
+        months = sorted(monthly)
+        incoming = [monthly[m][0] / 100 for m in months]
+        outgoing = [monthly[m][1] / 100 for m in months]
+        x = list(range(len(months)))
+        width = 0.38
+        ax.bar([v - width / 2 for v in x], incoming, width=width,
+               color=UP, label="Поступления")
+        ax.bar([v + width / 2 for v in x], outgoing, width=width,
+               color=DOWN, label="Списания")
+        ax.set_xticks(x)
+        ax.set_xticklabels(months, rotation=30, ha="right", color=MUTED, fontsize=8)
+        ax.legend(frameon=False, labelcolor=MUTED, fontsize=8)
+        ax.yaxis.set_major_formatter(lambda value, _pos: f"{value:,.0f}".replace(",", " "))
+        style_axes(ax)
+        self.flow_figure.tight_layout()
+        self.flow_canvas.draw_idle()
+
+    def _draw_category_chart(self, operations):
+        categories = {}
+        for operation in operations:
+            if operation["delta"] < 0:
+                categories[operation["category"]] = (
+                    categories.get(operation["category"], 0) - operation["delta"]
+                )
+        ax = self.category_axes
+        ax.clear()
+        ax.set_facecolor(SURFACE)
+        if not categories:
+            ax.text(0.5, 0.5, "Нет списаний за выбранный период",
+                    color=MUTED, ha="center", va="center", transform=ax.transAxes)
+            ax.axis("off")
+            self.category_canvas.draw_idle()
+            return
+
+        ranked = sorted(categories.items(), key=lambda item: item[1], reverse=True)
+        if len(ranked) > 6:
+            top = ranked[:5]
+            other = sum(value for _, value in ranked[5:])
+            ranked = top + [("Прочее", other)]
+        labels = [name for name, _ in ranked]
+        values = [value / 100 for _, value in ranked]
+        ax.pie(values, labels=labels, autopct="%1.0f%%", startangle=90,
+               colors=PIE[:len(values)],
+               textprops={"color": TEXT, "fontsize": 8},
+               wedgeprops={"edgecolor": SURFACE, "linewidth": 1})
+        ax.set_aspect("equal")
+        self.category_figure.tight_layout()
+        self.category_canvas.draw_idle()
 
     def refresh(self):
         with connect() as conn:
-            rows = conn.execute("""
-                SELECT tx_type AS operation, COUNT(*) AS n,
-                       COALESCE(SUM(amount_cents), 0) AS total
-                FROM transactions
-                GROUP BY tx_type
-                UNION ALL
-                SELECT CASE side
-                           WHEN 'BUY' THEN 'StockPurchase'
-                           ELSE 'StockSale'
-                       END AS operation,
-                       COUNT(*) AS n, COALESCE(SUM(total_cents), 0) AS total
-                FROM trades
-                GROUP BY side
-                ORDER BY operation
-            """).fetchall()
-            income = conn.execute("""
-                SELECT COALESCE(SUM(amount_cents), 0)
-                FROM transactions
-                WHERE tx_type IN ('Income', 'Deposit')
-            """).fetchone()[0]
-            expense = conn.execute("""
-                SELECT COALESCE(SUM(amount_cents), 0)
-                FROM transactions
-                WHERE tx_type IN ('Expense', 'Withdrawal')
-            """).fetchone()[0]
+            all_operations = operation_rows(conn)
             balance = cash_balance(conn)
-        labels = {
-            **TRANSACTION_LABELS,
-            "StockPurchase": "Покупка акций",
-            "StockSale": "Продажа акций",
-        }
-        self.summary.setText(
-            f"Доходы и пополнения: {money(income)}     "
-            f"Расходы и снятия: {money(expense)}     "
-            f"Денежный баланс с учётом биржи: {money(balance)}"
-        )
-        self.table.setRowCount(len(rows))
-        for r, row in enumerate(rows):
-            vals = [labels.get(row["operation"], row["operation"]),
-                    row["n"], money(row["total"] or 0)]
-            for c, value in enumerate(vals):
-                put(self.table, r, c, value)
+            cost, portfolio_value = self._portfolio_totals(conn)
+
+        start = self._period_start()
+        operations = [
+            row for row in all_operations
+            if start is None or row["date"] >= start
+        ]
+        income = sum(row["delta"] for row in operations if row["delta"] > 0)
+        expense = -sum(row["delta"] for row in operations if row["delta"] < 0)
+        net = income - expense
+        pnl = portfolio_value - cost
+
+        self.income_metric.value_label.setText(money(income))
+        self.expense_metric.value_label.setText(money(expense))
+        self.net_metric.value_label.setText(("+" if net > 0 else "") + money(net))
+        self.balance_metric.value_label.setText(money(balance))
+        self.pnl_metric.value_label.setText(("+" if pnl > 0 else "") + money(pnl))
+
+        grouped = {}
+        for row in operations:
+            item = grouped.setdefault(row["type"], [0, 0])
+            item[0] += 1
+            item[1] += abs(row["delta"])
+        breakdown_rows = sorted(grouped.items(), key=lambda item: item[0])
+        self.breakdown.setRowCount(len(breakdown_rows))
+        for r, (kind, values) in enumerate(breakdown_rows):
+            for c, value in enumerate((kind, values[0], money(values[1]))):
+                put(self.breakdown, r, c, value)
+
+        self.history.setRowCount(len(operations))
+        for r, row in enumerate(operations):
+            values = [row["date"], row["type"], row["category"],
+                      row["description"], row["amount"]]
+            for c, value in enumerate(values):
+                put(self.history, r, c, value)
+
+        self._draw_flow_chart(operations)
+        self._draw_category_chart(operations)
 
 
 class StockMarketPage(QWidget):
