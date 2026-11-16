@@ -752,8 +752,10 @@ class SimulationPage(QWidget):
         layout.addWidget(self.canvas, 1)
         self._cash_cents = 0
         self._portfolio_cents = 0
+        self._projection_basis = None
 
-    def refresh(self):
+    def refresh_live_values(self):
+        previous_total = self._cash_cents + self._portfolio_cents
         with connect() as conn:
             self._cash_cents = cash_balance(conn)
             manual = conn.execute("""
@@ -778,6 +780,16 @@ class SimulationPage(QWidget):
         self.cash_value.value_label.setText(money(self._cash_cents))
         self.portfolio_value.value_label.setText(money(self._portfolio_cents))
         self.total_value.value_label.setText(money(total))
+        if self._projection_basis is not None and total != self._projection_basis:
+            self.details.setText(
+                "Текущая позиция изменилась после последнего расчёта. "
+                "Результат на графике рассчитан по прежнему стартовому капиталу — пересчитай сценарий."
+            )
+        return total
+
+    def refresh(self):
+        self.refresh_live_values()
+        self._projection_basis = None
         self.output.setText("—")
         self.details.setText("Текущие значения обновлены. Настрой параметры и рассчитай сценарии.")
         self.axes.clear()
@@ -799,6 +811,7 @@ class SimulationPage(QWidget):
                 self.simulations.value(),
                 to_cents(self.contribution.value()) if self.contribution.value() > 0 else 0,
             )
+            self._projection_basis = self._cash_cents + self._portfolio_cents
             self.output.setText(f"Медианный капитал через {self.years.value()} лет: {money(result['median'])}")
             self.details.setText(
                 f"Среднее: {money(result['average'])} · "
