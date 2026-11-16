@@ -114,13 +114,19 @@ def cash_balance(conn):
     trade_cash = conn.execute(
         "SELECT COALESCE(SUM(CASE WHEN side='SELL' THEN total_cents ELSE -total_cents END),0) FROM trades"
     ).fetchone()[0]
-    return income - expense + trade_cash
+    bond_trade_cash = conn.execute(
+        "SELECT COALESCE(SUM(CASE WHEN side='SELL' THEN total_cents ELSE -total_cents END),0) FROM bond_trades"
+    ).fetchone()[0]
+    coupons = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM bond_coupon_payments").fetchone()[0]
+    return income - expense + trade_cash + bond_trade_cash + coupons
 
 
 def operation_rows(conn):
     rows = []
     transactions = conn.execute("SELECT * FROM transactions").fetchall()
     trades = conn.execute("SELECT * FROM trades").fetchall()
+    bond_trades = conn.execute("SELECT * FROM bond_trades").fetchall()
+    coupons = conn.execute("SELECT * FROM bond_coupon_payments").fetchall()
 
     for row in transactions:
         plus = row["tx_type"] in ("Income", "Deposit")
@@ -143,6 +149,23 @@ def operation_rows(conn):
             "delta": row["total_cents"] if is_sale else -row["total_cents"],
         })
 
+    for row in bond_trades:
+        is_sale = row["side"] == "SELL"
+        rows.append({
+            "date": row["trade_date"], "id": row["id"], "source": 2,
+            "type": "Продажа облигаций" if is_sale else "Покупка облигаций",
+            "category": "Облигации",
+            "description": f"{row['ticker']} · {row['quantity']:.2f} шт. по {money(row['price_cents'])}",
+            "amount": ("+" if is_sale else "−") + money(row["total_cents"]),
+            "delta": row["total_cents"] if is_sale else -row["total_cents"],
+        })
+    for row in coupons:
+        rows.append({
+            "date": row["payment_date"], "id": row["id"], "source": 3,
+            "type": "Выплата купона", "category": "Купонный доход",
+            "description": row["ticker"] + " · полугодовая выплата",
+            "amount": "+" + money(row["amount_cents"]), "delta": row["amount_cents"],
+        })
     rows.sort(key=lambda item: (item["date"], item["id"], item["source"]), reverse=True)
     return rows
 
@@ -391,6 +414,143 @@ class PortfolioPage(QWidget):
                     ("+" if pnl > 0 else "") + money(pnl), f"{pnl_pct:+.2f}%"]
             for c, value in enumerate(vals):
                 put(self.table, r, c, value)
+
+
+class BondsPage(QWidget):
+    """Учебный рынок облигаций с плавающей рыночной ценой и полугодовыми купонами."""
+    def __init__(self):
+        super().__init__()
+        layout = QVBoxLayout(self)
+        layout.addLayout(heading("Рынок облигаций", "Фиксированный купон · выплаты каждые шесть месяцев · цена меняется на рынке"))
+        self.summary = QLabel("Доступно: —")
+        self.summary.setStyleSheet("font-size: 16px; font-weight: bold;")
+        layout.addWidget(self.summary)
+        self.market = QTableWidget(0, 8)
+        self.market.setHorizontalHeaderLabels(["Тикер", "Эмитент", "Тип", "Цена", "Купон годовых", "Выплата за штуку", "Следующий купон", "Погашение"])
+        configure_table(self.market)
+        self.market.itemSelectionChanged.connect(self.update_selected)
+        layout.addWidget(wrap(self.market), 3)
+        trade = QGroupBox("Сделка с облигациями")
+        form = QHBoxLayout(trade)
+        self.selected = QLabel("Выбери выпуск")
+        self.quantity = QDoubleSpinBox()
+        self.quantity.setRange(1, 1_000_000)
+        self.quantity.setDecimals(0)
+        self.quantity.setValue(1)
+        buy = QPushButton("Купить")
+        buy.setObjectName("Buy")
+        sell = QPushButton("Продать")
+        sell.setObjectName("Sell")
+        buy.clicked.connect(lambda: self.execute_trade("BUY"))
+        sell.clicked.connect(lambda: self.execute_trade("SELL"))
+        form.addWidget(self.selected, 2)
+        form.addWidget(QLabel("Количество:"))
+        form.addWidget(self.quantity)
+        form.addWidget(buy)
+        form.addWidget(sell)
+        layout.addWidget(trade)
+        layout.addWidget(section("Мои облигации"))
+        self.holdings = QTableWidget(0, 7)
+        self.holdings.setHorizontalHeaderLabels(["Тикер", "Выпуск", "Количество", "Средняя цена", "Рыночная стоимость", "Купон за полгода", "Погашение"])
+        configure_table(self.holdings)
+        layout.addWidget(wrap(self.holdings), 2)
+        self.selected_ticker = None
+        self.timer = QTimer(self)
+        self.timer.setInterval(30000)
+        self.timer.timeout.connect(self.move_bond_market)
+        self.timer.start()
+
+    def process_coupon_payments(self, conn):
+        today = date.today()
+        due = conn.execute("SELECT * FROM bonds WHERE next_coupon_date<=? AND next_coupon_date<maturity_date", (today.isoformat(),)).fetchall()
+        from dateutil.relativedelta import relativedelta
+        for bond in due:
+            holding = conn.execute("SELECT quantity FROM bond_holdings WHERE ticker=?", (bond["ticker"],)).fetchone()
+            quantity = float(holding["quantity"]) if holding else 0.0
+            if quantity > 0:
+                amount = int(round(quantity * bond["face_value_cents"] * bond["coupon_rate"] / 100 / 2))
+                conn.execute("INSERT INTO bond_coupon_payments(payment_date,ticker,quantity,amount_cents) VALUES(?,?,?,?)",
+                             (bond["next_coupon_date"], bond["ticker"], quantity, amount))
+            next_date = date.fromisoformat(bond["next_coupon_date"]) + relativedelta(months=6)
+            conn.execute("UPDATE bonds SET next_coupon_date=? WHERE ticker=?", (next_date.isoformat(), bond["ticker"]))
+
+    def refresh(self):
+        with connect() as conn:
+            self.process_coupon_payments(conn)
+            rows = conn.execute("SELECT * FROM bonds ORDER BY issuer_type,ticker").fetchall()
+            positions = conn.execute("""
+                SELECT h.*,b.name,b.price_cents,b.face_value_cents,b.coupon_rate,b.maturity_date
+                FROM bond_holdings h JOIN bonds b ON b.ticker=h.ticker
+                WHERE h.quantity>0 ORDER BY h.ticker
+            """).fetchall()
+            cash = cash_balance(conn)
+            record_financial_snapshot(conn)
+        self.summary.setText(f"Доступно на счёте: {money(cash)}")
+        self.market.setRowCount(len(rows))
+        for r,b in enumerate(rows):
+            semi = int(round(b["face_value_cents"] * b["coupon_rate"] / 100 / 2))
+            vals=[b["ticker"],b["name"],b["issuer_type"],money(b["price_cents"]),
+                  f"{b['coupon_rate']:.2f}%",money(semi),b["next_coupon_date"],b["maturity_date"]]
+            for c,v in enumerate(vals): put(self.market,r,c,v)
+            if b["ticker"]==self.selected_ticker: self.market.selectRow(r)
+        self.holdings.setRowCount(len(positions))
+        for r,h in enumerate(positions):
+            semi=int(round(h["quantity"]*h["face_value_cents"]*h["coupon_rate"]/100/2))
+            vals=[h["ticker"],h["name"],f"{h['quantity']:.0f}",money(h["average_price_cents"]),
+                  money(int(h["quantity"]*h["price_cents"])),money(semi),h["maturity_date"]]
+            for c,v in enumerate(vals): put(self.holdings,r,c,v)
+        self.update_selected()
+
+    def update_selected(self):
+        row=self.market.currentRow()
+        if row>=0 and self.market.item(row,0):
+            self.selected_ticker=self.market.item(row,0).text()
+            self.selected.setText("Выбрано: "+self.selected_ticker)
+
+    def move_bond_market(self):
+        import random
+        with connect() as conn:
+            rows=conn.execute("SELECT ticker,price_cents,volatility FROM bonds").fetchall()
+            for bond in rows:
+                # Небольшое ежедневное изменение цены; размер купона от этого не меняется.
+                shock=random.gauss(0,bond["volatility"])
+                new_price=max(1,int(round(bond["price_cents"]*(1+shock))))
+                conn.execute("UPDATE bonds SET previous_price_cents=price_cents,price_cents=? WHERE ticker=?",
+                             (new_price,bond["ticker"]))
+            self.process_coupon_payments(conn)
+            record_financial_snapshot(conn)
+        self.refresh()
+
+    def execute_trade(self, side):
+        ticker=self.selected_ticker
+        if not ticker:
+            QMessageBox.warning(self,"Облигация не выбрана","Сначала выбери выпуск.")
+            return
+        qty=int(self.quantity.value())
+        try:
+            with connect() as conn:
+                bond=conn.execute("SELECT * FROM bonds WHERE ticker=?",(ticker,)).fetchone()
+                holding=conn.execute("SELECT * FROM bond_holdings WHERE ticker=?",(ticker,)).fetchone()
+                price=bond["price_cents"]
+                total=price*qty
+                cash=cash_balance(conn)
+                held=float(holding["quantity"]) if holding else 0.0
+                if side=="BUY":
+                    if cash<total: raise ValueError(f"Недостаточно средств. Не хватает {money(total-cash)}.")
+                    new_qty=held+qty
+                    avg=int(round((held*holding["average_price_cents"]+qty*price)/new_qty)) if new_qty else 0
+                else:
+                    if held<qty: raise ValueError(f"Недостаточно облигаций. В наличии: {held:.0f}.")
+                    new_qty=held-qty
+                    avg=holding["average_price_cents"] if new_qty else 0
+                conn.execute("UPDATE bond_holdings SET quantity=?,average_price_cents=? WHERE ticker=?",
+                             (new_qty,avg,ticker))
+                conn.execute("INSERT INTO bond_trades(trade_date,ticker,side,quantity,price_cents,total_cents) VALUES(?,?,?,?,?,?)",
+                             (date.today().isoformat(),ticker,side,qty,price,total))
+                record_financial_snapshot(conn)
+            self.refresh()
+        except Exception as exc:
+            QMessageBox.warning(self,"Ошибка сделки",str(exc))
 
 class DepositPage(QWidget):
     def __init__(self):
@@ -887,7 +1047,7 @@ class StockMarketPage(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.addLayout(heading("Рынок акций", ""))
+        layout.addLayout(heading("Рынок акций", "32 компании · учебные котировки с независимой волатильностью"))
         summary = QHBoxLayout()
         self.cash_label = QLabel("Доступно: —")
         self.cash_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #dde0e4; font-family: Helvetica, Arial, sans-serif;")
