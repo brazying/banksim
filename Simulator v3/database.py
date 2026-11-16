@@ -289,24 +289,29 @@ def simulated_datetime(conn):
     return datetime.fromisoformat(row["simulated_at"])
 
 
-def record_financial_snapshot(conn):
-    """Сохранить снимок капитала с отметкой единого симулируемого времени."""
-
+def cash_balance(conn):
+    """Единый источник истины для денежных средств на счёте."""
     income = conn.execute(
         "SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type IN ('Income','Deposit')"
     ).fetchone()[0]
     expense = conn.execute(
         "SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type IN ('Expense','Withdrawal')"
     ).fetchone()[0]
-    trade_cash = conn.execute(
+    stock_cash = conn.execute(
         "SELECT COALESCE(SUM(CASE WHEN side='SELL' THEN total_cents ELSE -total_cents END),0) FROM trades"
     ).fetchone()[0]
-    bond_trade_cash = conn.execute(
+    bond_cash = conn.execute(
         "SELECT COALESCE(SUM(CASE WHEN side='SELL' THEN total_cents ELSE -total_cents END),0) FROM bond_trades"
     ).fetchone()[0]
     coupons = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM bond_coupon_payments").fetchone()[0]
     redemptions = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM bond_redemptions").fetchone()[0]
-    cash = int(income - expense + trade_cash + bond_trade_cash + coupons + redemptions)
+    return int(income - expense + stock_cash + bond_cash + coupons + redemptions)
+
+
+def record_financial_snapshot(conn):
+    """Сохранить снимок капитала с отметкой единого симулируемого времени."""
+
+    cash = cash_balance(conn)
 
     manual = conn.execute("""
         SELECT COALESCE(SUM(CAST(ROUND(a.quantity * a.average_price_cents) AS INTEGER)),0) AS cost,
