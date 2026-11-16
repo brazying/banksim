@@ -56,6 +56,19 @@ def init_db():
             final_cents INTEGER NOT NULL,
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
+        CREATE TABLE IF NOT EXISTS market_clock (
+            id INTEGER PRIMARY KEY CHECK(id=1),
+            simulated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS stock_price_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL REFERENCES stocks(ticker),
+            simulated_at TEXT NOT NULL,
+            price_cents INTEGER NOT NULL CHECK(price_cents>0),
+            UNIQUE(ticker, simulated_at)
+        );
+        CREATE INDEX IF NOT EXISTS idx_stock_history_ticker_time
+            ON stock_price_history(ticker, simulated_at);
         CREATE TABLE IF NOT EXISTS stocks (
             ticker TEXT PRIMARY KEY,
             name TEXT NOT NULL,
@@ -191,6 +204,14 @@ def init_db():
             ("CSCO","Cisco Systems",6_000,6_000,0.010),
         ])
         conn.executemany("INSERT OR IGNORE INTO stocks(ticker,name,price_cents,previous_price_cents,volatility) VALUES(?,?,?,?,?)", stocks)
+        from datetime import datetime
+        market_now = datetime.now().replace(minute=0, second=0, microsecond=0).isoformat(timespec="seconds")
+        conn.execute("INSERT OR IGNORE INTO market_clock(id,simulated_at) VALUES(1,?)", (market_now,))
+        conn.execute("""
+            INSERT OR IGNORE INTO stock_price_history(ticker,simulated_at,price_cents)
+            SELECT ticker, ?, price_cents FROM stocks
+        """, (market_now,))
+
         conn.execute("INSERT OR IGNORE INTO holdings(ticker, quantity, average_price_cents) SELECT ticker, 0, 0 FROM stocks")
         from datetime import date
         bond_rows = [
