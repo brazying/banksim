@@ -7,7 +7,7 @@ from PyQt6.QtCore import Qt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from database import connect, record_financial_snapshot
-from finance import to_cents, money, compound_interest, projected_value, monte_carlo, monte_carlo_price_step
+from finance import to_cents, money, compound_interest, projected_value, monte_carlo, monte_carlo_price_step, monte_carlo_capital
 from charts import CapitalChart, AllocationChart, style_axes
 from theme import *
 from PyQt6.QtGui import QColor, QFont
@@ -446,96 +446,146 @@ class DepositPage(QWidget):
             QMessageBox.warning(self, "Ошибка расчёта", str(exc))
 
 class SimulationPage(QWidget):
+    """Сценарное моделирование текущего капитала пользователя."""
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.addLayout(heading("Моделирование", ""))
+        layout.addLayout(heading("Моделирование капитала", "Прогноз на основе фактического баланса и текущей стоимости портфеля"))
 
-        box = QGroupBox("Параметры симуляции")
+        current_box = QGroupBox("Текущая финансовая позиция")
+        current_row = QHBoxLayout(current_box)
+        self.cash_value = metric("Деньги на счёте", "—")
+        self.portfolio_value = metric("Инвестиционный портфель", "—")
+        self.total_value = metric("Стартовый капитал", "—", hero=True)
+        for item in (self.cash_value, self.portfolio_value, self.total_value):
+            current_row.addWidget(item, 1)
+        layout.addWidget(current_box)
+
+        box = QGroupBox("Параметры сценария")
         form = QFormLayout(box)
-        self.initial = QDoubleSpinBox()
-        self.initial.setRange(0.01, 1_000_000_000)
-        self.initial.setDecimals(2)
-        self.initial.setValue(10000)
-
         self.rate = QDoubleSpinBox()
         self.rate.setRange(-99, 100)
         self.rate.setDecimals(2)
-        self.rate.setValue(6)
-
+        self.rate.setValue(8)
         self.volatility = QDoubleSpinBox()
         self.volatility.setRange(0, 100)
         self.volatility.setDecimals(2)
-        self.volatility.setValue(15)
-
+        self.volatility.setValue(18)
         self.years = QSpinBox()
         self.years.setRange(1, 50)
         self.years.setValue(10)
-
         self.simulations = QSpinBox()
         self.simulations.setRange(100, 10000)
         self.simulations.setSingleStep(500)
         self.simulations.setValue(1000)
-
-        self.output = QLabel("—")
-        self.output.setStyleSheet("font-size: 22px; color: #dde0e4; font-family: Helvetica, Arial, sans-serif; font-weight: bold;")
-        self.details = QLabel("Укажи параметры и запусти моделирование.")
-        self.details.setWordWrap(True)
-
-        run = QPushButton("Запустить Monte Carlo")
-        run.setObjectName("Action")
-        run.clicked.connect(self.run_projection)
-
-        form.addRow("Начальный капитал", self.initial)
-        form.addRow("Ожидаемая доходность в год (%)", self.rate)
-        form.addRow("Волатильность в год (%)", self.volatility)
+        self.contribution = QDoubleSpinBox()
+        self.contribution.setRange(0, 1_000_000_000)
+        self.contribution.setDecimals(2)
+        self.contribution.setSuffix(" ₽ / мес.")
+        self.contribution.setValue(0)
+        form.addRow("Ожидаемая доходность инвестиций в год (%)", self.rate)
+        form.addRow("Волатильность инвестиций в год (%)", self.volatility)
+        form.addRow("Ежемесячное пополнение портфеля", self.contribution)
         form.addRow("Горизонт (лет)", self.years)
         form.addRow("Количество сценариев", self.simulations)
+        run = QPushButton("Рассчитать сценарии")
+        run.setObjectName("Action")
+        run.clicked.connect(self.run_projection)
         form.addRow("", run)
         layout.addWidget(box)
 
-        layout.addWidget(section("Средний результат"))
+        layout.addWidget(section("Результат моделирования"))
+        self.output = QLabel("—")
+        self.output.setStyleSheet("font-size: 22px; color: #dde0e4; font-family: Helvetica, Arial, sans-serif; font-weight: bold;")
+        self.details = QLabel("Параметры доходности — допущения для сценария, а не обещание результата.")
+        self.details.setWordWrap(True)
         layout.addWidget(self.output)
         layout.addWidget(self.details)
 
-        self.figure = Figure(figsize=(7, 2.5), dpi=90, facecolor=SURFACE)
+        self.figure = Figure(figsize=(8, 3.5), dpi=90, facecolor=SURFACE)
         self.canvas = FigureCanvas(self.figure)
         self.axes = self.figure.add_subplot(111)
         style_axes(self.axes)
         layout.addWidget(self.canvas, 1)
+        self._cash_cents = 0
+        self._portfolio_cents = 0
+
+    def refresh(self):
+        with connect() as conn:
+            self._cash_cents = cash_balance(conn)
+            manual = conn.execute("""
+                SELECT COALESCE(SUM(CAST(ROUND(a.quantity*a.current_price_cents) AS INTEGER)),0)
+                FROM assets a
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM holdings h
+                    WHERE h.ticker=UPPER(a.ticker) AND h.quantity>0
+                )
+            """).fetchone()[0]
+            market = conn.execute("""
+                SELECT COALESCE(SUM(CAST(ROUND(h.quantity*s.price_cents) AS INTEGER)),0)
+                FROM holdings h JOIN stocks s ON s.ticker=h.ticker
+                WHERE h.quantity>0
+            """).fetchone()[0]
+            self._portfolio_cents = int(manual + market)
+        total = self._cash_cents + self._portfolio_cents
+        self.cash_value.value_label.setText(money(self._cash_cents))
+        self.portfolio_value.value_label.setText(money(self._portfolio_cents))
+        self.total_value.value_label.setText(money(total))
+        self.output.setText("—")
+        self.details.setText("Текущие значения обновлены. Настрой параметры и рассчитай сценарии.")
+        self.axes.clear()
+        style_axes(self.axes)
+        self.axes.text(0.5, 0.5, "График появится после расчёта",
+                       color=MUTED, ha="center", va="center", transform=self.axes.transAxes)
+        self.canvas.draw_idle()
 
     def run_projection(self):
         try:
-            initial = to_cents(self.initial.value())
-            result = monte_carlo(
-                initial,
+            if self._cash_cents + self._portfolio_cents <= 0:
+                self.refresh()
+            result = monte_carlo_capital(
+                self._cash_cents,
+                self._portfolio_cents,
                 self.rate.value(),
                 self.volatility.value(),
                 self.years.value(),
-                self.simulations.value()
+                self.simulations.value(),
+                to_cents(self.contribution.value()) if self.contribution.value() > 0 else 0,
             )
-            self.output.setText(money(result["average"]))
+            self.output.setText(f"Медианный капитал через {self.years.value()} лет: {money(result['median'])}")
             self.details.setText(
-                f"Медиана: {money(result['median'])}    "
-                f"5-й процентиль: {money(result['p5'])}    "
-                f"95-й процентиль: {money(result['p95'])}\n"
-                f"Вероятность закончить ниже начального капитала: "
-                f"{result['loss_probability']:.1f}%"
+                f"Среднее: {money(result['average'])} · "
+                f"Нижний сценарий (5%): {money(result['p5'])} · "
+                f"Верхний сценарий (95%): {money(result['p95'])}\\n"
+                f"Вероятность оказаться ниже текущего капитала: {result['loss_probability']:.1f}%. "
+                f"В расчёте участвуют фактический баланс и текущая стоимость портфеля."
             )
 
-            self.axes.clear()
-            style_axes(self.axes)
-            self.axes.hist([v / 100 for v in result["final_values"]], bins=30, color=ACCENT, edgecolor=SURFACE, alpha=0.9)
-            self.axes.axvline(result["median"] / 100, color=TEXT, linewidth=1.2, linestyle="--")
-            self.axes.set_xlabel("Итоговый капитал, ₽ (пунктир — медиана)", color=MUTED, fontsize=9)
-            self.axes.set_ylabel("Сценарии", color=MUTED, fontsize=9)
+            ax = self.axes
+            ax.clear()
+            ax.set_facecolor(SURFACE)
+            years = result["years"]
+            ax.fill_between(years, result["p5_path"], result["p95_path"],
+                            color=ACCENT, alpha=0.18, label="Диапазон 5–95%")
+            ax.plot(years, result["median_path"], color=ACCENT,
+                    linewidth=2.2, label="Медианный сценарий")
+            ax.plot(years, result["p5_path"], color=DOWN, linewidth=1,
+                    linestyle="--", label="5-й процентиль")
+            ax.plot(years, result["p95_path"], color=UP, linewidth=1,
+                    linestyle="--", label="95-й процентиль")
+            ax.set_xlabel("Годы", color=MUTED, fontsize=9)
+            ax.set_ylabel("Общий капитал, ₽", color=MUTED, fontsize=9)
+            ax.yaxis.set_major_formatter(lambda value, _pos: f"{value:,.0f}".replace(",", " "))
+            ax.legend(frameon=False, labelcolor=MUTED, fontsize=8)
+            style_axes(ax)
             self.figure.tight_layout()
             self.canvas.draw_idle()
 
             with connect() as conn:
                 conn.execute(
                     "INSERT INTO simulation_runs(initial_cents,annual_rate,years,final_cents) VALUES(?,?,?,?)",
-                    (initial, self.rate.value(), self.years.value(), result["average"])
+                    (self._cash_cents + self._portfolio_cents, self.rate.value(),
+                     self.years.value(), result["average"])
                 )
         except Exception as exc:
             QMessageBox.warning(self, "Ошибка моделирования", str(exc))
