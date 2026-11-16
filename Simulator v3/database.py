@@ -273,7 +273,7 @@ def init_db():
                 OR EXISTS(SELECT 1 FROM bond_redemptions)
         """).fetchone()[0]
         if not has_any:
-            seed_date = datetime.fromisoformat(market_now).isoformat(timespec="seconds")
+            seed_date = clock_row["simulated_at"]
             conn.execute(
                 "INSERT INTO transactions(tx_date,tx_type,category,description,amount_cents) VALUES(?,?,?,?,?)",
                 (seed_date, "Income", "Стартовый капитал", "Начальный баланс для демонстрации торговли", 1_000_000)
