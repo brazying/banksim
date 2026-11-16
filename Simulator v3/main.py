@@ -74,7 +74,7 @@ class MainWindow(QMainWindow):
         # Страницы, не являющиеся рынками, тоже должны показывать актуальные
         # деньги и стоимость портфеля после купонов, погашений и переоценки.
         current = self.stack.currentWidget()
-        if current is SimulationPage:
+        if isinstance(current, SimulationPage):
             current.refresh_live_values()
         elif current not in (self.stock_market_page, self.bonds_page) and hasattr(current, "refresh"):
             current.refresh()
