@@ -82,6 +82,28 @@ def init_db():
         trade_columns = {row["name"] for row in conn.execute("PRAGMA table_info(trades)")}
         if "realized_pnl_cents" not in trade_columns:
             conn.execute("ALTER TABLE trades ADD COLUMN realized_pnl_cents INTEGER NOT NULL DEFAULT 0")
+            # Восстанавливаем историческую реализованную прибыль для старых сделок
+            # по методу средневзвешенной себестоимости.
+            positions = {}
+            legacy_trades = conn.execute(
+                "SELECT id,ticker,side,quantity,price_cents FROM trades ORDER BY trade_date,id"
+            ).fetchall()
+            for trade in legacy_trades:
+                qty, average = positions.get(trade["ticker"], (0.0, 0.0))
+                if trade["side"] == "BUY":
+                    new_qty = qty + trade["quantity"]
+                    new_average = (
+                        (qty * average + trade["quantity"] * trade["price_cents"]) / new_qty
+                        if new_qty else 0.0
+                    )
+                    positions[trade["ticker"]] = (new_qty, new_average)
+                else:
+                    realized = int(round(trade["quantity"] * (trade["price_cents"] - average)))
+                    conn.execute(
+                        "UPDATE trades SET realized_pnl_cents=? WHERE id=?",
+                        (realized, trade["id"])
+                    )
+                    positions[trade["ticker"]] = (max(0.0, qty - trade["quantity"]), average)
 
         stocks = [
             ("AAPL", "Apple Inc.", 23_000, 23_000, 0.010),
