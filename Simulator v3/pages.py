@@ -571,7 +571,7 @@ class BondsPage(QWidget):
         with connect() as conn:
             rows=conn.execute("SELECT ticker,price_cents,volatility FROM bonds").fetchall()
             for bond in rows:
-                # Небольшое ежедневное изменение цены; размер купона от этого не меняется.
+                # Небольшое почасовое изменение цены; размер купона от этого не меняется.
                 shock=random.gauss(0,bond["volatility"] / (24 ** 0.5))
                 new_price=max(1,int(round(bond["price_cents"]*(1+shock))))
                 conn.execute("UPDATE bonds SET previous_price_cents=price_cents,price_cents=? WHERE ticker=?",
@@ -911,7 +911,7 @@ class ReportsPage(QWidget):
         layout.addWidget(wrap(self.history))
 
         self.note = QLabel("Поступления и списания включают банковские операции, сделки с акциями и облигациями, купоны и погашения. "
-                           "Текущий баланс и оценка портфеля показывают состояние на сегодня.")
+                           "Текущий баланс и оценка портфеля показывают состояние на текущий момент симуляции.")
         self.note.setWordWrap(True)
         self.note.setObjectName("Muted")
         layout.addWidget(self.note)
@@ -1274,8 +1274,8 @@ class StockMarketPage(QWidget):
                 )
                 conn.execute(
                     "UPDATE stocks SET previous_price_cents=price_cents, "
-                    "price_cents=?, updated_at=CURRENT_TIMESTAMP WHERE ticker=?",
-                    (new_price, stock["ticker"]),
+                    "price_cents=?, updated_at=? WHERE ticker=?",
+                    (new_price, stamp, stock["ticker"]),
                 )
                 conn.execute(
                     "INSERT OR IGNORE INTO stock_price_history(ticker,simulated_at,price_cents) VALUES(?,?,?)",
