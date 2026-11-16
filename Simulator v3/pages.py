@@ -488,10 +488,6 @@ class BondsPage(QWidget):
         configure_table(self.holdings)
         layout.addWidget(wrap(self.holdings), 2)
         self.selected_ticker = None
-        self.timer = QTimer(self)
-        self.timer.setInterval(15000)
-        self.timer.timeout.connect(self.move_bond_market)
-        self.timer.start()
 
     def process_coupon_payments(self, conn):
         today = simulated_datetime(conn).date()
@@ -1214,10 +1210,6 @@ class StockMarketPage(QWidget):
         configure_table(self.holdings_table)
         layout.addWidget(wrap(self.holdings_table), 2)
 
-        self.timer = QTimer(self)
-        self.timer.setInterval(15000)
-        self.timer.timeout.connect(self.move_market)
-        self.timer.start()
         self.selected_ticker = None
 
     def cash_balance(self, conn):
