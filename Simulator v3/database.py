@@ -67,9 +67,22 @@ def init_db():
             side TEXT NOT NULL CHECK(side IN ('BUY','SELL')),
             quantity REAL NOT NULL CHECK(quantity > 0),
             price_cents INTEGER NOT NULL CHECK(price_cents > 0),
-            total_cents INTEGER NOT NULL CHECK(total_cents > 0)
+            total_cents INTEGER NOT NULL CHECK(total_cents > 0),
+            realized_pnl_cents INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE TABLE IF NOT EXISTS financial_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            captured_at TEXT NOT NULL,
+            cash_cents INTEGER NOT NULL,
+            portfolio_cost_cents INTEGER NOT NULL,
+            portfolio_value_cents INTEGER NOT NULL,
+            net_worth_cents INTEGER NOT NULL
         );
         """)
+        trade_columns = {row["name"] for row in conn.execute("PRAGMA table_info(trades)")}
+        if "realized_pnl_cents" not in trade_columns:
+            conn.execute("ALTER TABLE trades ADD COLUMN realized_pnl_cents INTEGER NOT NULL DEFAULT 0")
+
         stocks = [
             ("AAPL", "Apple Inc.", 23_000, 23_000, 0.010),
             ("MSFT", "Microsoft Corp.", 42_000, 42_000, 0.009),
@@ -86,3 +99,45 @@ def init_db():
         if not has_any:
             conn.execute("INSERT INTO transactions(tx_date,tx_type,category,description,amount_cents) VALUES(?,?,?,?,?)",
                          (date.today().isoformat(), "Income", "Стартовый капитал", "Начальный баланс для демонстрации торговли", 1_000_000))
+        record_financial_snapshot(conn)
+
+
+def record_financial_snapshot(conn):
+    """Сохранить согласованный снимок денежных средств и рыночной стоимости активов."""
+    from datetime import datetime
+
+    income = conn.execute(
+        "SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type IN ('Income','Deposit')"
+    ).fetchone()[0]
+    expense = conn.execute(
+        "SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type IN ('Expense','Withdrawal')"
+    ).fetchone()[0]
+    trade_cash = conn.execute(
+        "SELECT COALESCE(SUM(CASE WHEN side='SELL' THEN total_cents ELSE -total_cents END),0) FROM trades"
+    ).fetchone()[0]
+    cash = int(income - expense + trade_cash)
+
+    manual = conn.execute("""
+        SELECT COALESCE(SUM(CAST(ROUND(a.quantity * a.average_price_cents) AS INTEGER)),0) AS cost,
+               COALESCE(SUM(CAST(ROUND(a.quantity * a.current_price_cents) AS INTEGER)),0) AS value
+        FROM assets a
+        WHERE NOT EXISTS (
+            SELECT 1 FROM holdings h
+            WHERE h.ticker = UPPER(a.ticker) AND h.quantity > 0
+        )
+    """).fetchone()
+    market = conn.execute("""
+        SELECT COALESCE(SUM(CAST(ROUND(h.quantity * h.average_price_cents) AS INTEGER)),0) AS cost,
+               COALESCE(SUM(CAST(ROUND(h.quantity * s.price_cents) AS INTEGER)),0) AS value
+        FROM holdings h JOIN stocks s ON s.ticker=h.ticker
+        WHERE h.quantity > 0
+    """).fetchone()
+    portfolio_cost = int(manual["cost"] + market["cost"])
+    portfolio_value = int(manual["value"] + market["value"])
+    captured_at = datetime.now().isoformat(timespec="microseconds")
+    conn.execute(
+        """INSERT INTO financial_snapshots(
+               captured_at,cash_cents,portfolio_cost_cents,portfolio_value_cents,net_worth_cents
+           ) VALUES(?,?,?,?,?)""",
+        (captured_at, cash, portfolio_cost, portfolio_value, cash + portfolio_value),
+    )
