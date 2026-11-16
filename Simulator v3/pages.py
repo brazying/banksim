@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushBut
 from PyQt6.QtCore import Qt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-from database import connect, record_financial_snapshot
+from database import connect, record_financial_snapshot, simulated_datetime
 from finance import to_cents, money, compound_interest, projected_value, monte_carlo, monte_carlo_price_step, monte_carlo_capital
 from charts import CapitalChart, AllocationChart, style_axes
 from theme import *
@@ -324,8 +324,9 @@ class AccountPage(QWidget):
                             "Операция не добавлена. Сначала пополни счёт."
                         )
                         return
+                tx_date = simulated_datetime(conn).date().isoformat()
                 conn.execute("INSERT INTO transactions(tx_date,tx_type,category,description,amount_cents) VALUES(?,?,?,?,?)",
-                    (date.today().isoformat(), tx_type, category, self.description.text().strip(), cents))
+                    (tx_date, tx_type, category, self.description.text().strip(), cents))
                 record_financial_snapshot(conn)
             self.category.clear()
             self.description.clear()
@@ -488,12 +489,12 @@ class BondsPage(QWidget):
         layout.addWidget(wrap(self.holdings), 2)
         self.selected_ticker = None
         self.timer = QTimer(self)
-        self.timer.setInterval(30000)
+        self.timer.setInterval(15000)
         self.timer.timeout.connect(self.move_bond_market)
         self.timer.start()
 
     def process_coupon_payments(self, conn):
-        today = date.today()
+        today = simulated_datetime(conn).date()
         bonds = conn.execute("SELECT * FROM bonds").fetchall()
         for bond in bonds:
             next_date = date.fromisoformat(bond["next_coupon_date"])
@@ -534,7 +535,8 @@ class BondsPage(QWidget):
     def refresh(self):
         with connect() as conn:
             self.process_coupon_payments(conn)
-            rows = conn.execute("SELECT * FROM bonds WHERE maturity_date>? ORDER BY issuer_type,ticker", (date.today().isoformat(),)).fetchall()
+            simulated_today = simulated_datetime(conn).date().isoformat()
+            rows = conn.execute("SELECT * FROM bonds WHERE maturity_date>? ORDER BY issuer_type,ticker", (simulated_today,)).fetchall()
             positions = conn.execute("""
                 SELECT h.*,b.name,b.price_cents,b.face_value_cents,b.coupon_rate,b.maturity_date
                 FROM bond_holdings h JOIN bonds b ON b.ticker=h.ticker
@@ -604,8 +606,14 @@ class BondsPage(QWidget):
                     avg=holding["average_price_cents"] if new_qty else 0
                 conn.execute("UPDATE bond_holdings SET quantity=?,average_price_cents=? WHERE ticker=?",
                              (new_qty,avg,ticker))
-                conn.execute("INSERT INTO bond_trades(trade_date,ticker,side,quantity,price_cents,total_cents) VALUES(?,?,?,?,?,?)",
-                             (date.today().isoformat(),ticker,side,qty,price,total))
+                trade_date = simulated_datetime(conn).date().isoformat()
+                realized_pnl = int(round(qty * (price - holding["average_price_cents"]))) if side == "SELL" else 0
+                conn.execute(
+                    """INSERT INTO bond_trades(
+                           trade_date,ticker,side,quantity,price_cents,total_cents,realized_pnl_cents
+                       ) VALUES(?,?,?,?,?,?,?)""",
+                    (trade_date,ticker,side,qty,price,total,realized_pnl)
+                )
                 record_financial_snapshot(conn)
             self.refresh()
         except Exception as exc:
@@ -911,7 +919,8 @@ class ReportsPage(QWidget):
         days = self.period.currentData()
         if days == 0:
             return None
-        today = date.today()
+        with connect() as conn:
+            today = simulated_datetime(conn).date()
         if days == -1:
             return date(today.year, 1, 1).isoformat()
         return (today - timedelta(days=days - 1)).isoformat()
@@ -1020,30 +1029,31 @@ class ReportsPage(QWidget):
         ax = self.history_axes
         ax.clear()
         ax.set_facecolor(SURFACE)
-        # Для читаемости показываем последний согласованный снимок каждого дня.
-        daily = {}
+        # Один снимок на симулируемый час; время совпадает с котировками рынка.
+        hourly = {}
         for row in snapshots:
-            daily[row["captured_at"][:10]] = row
-        dates = sorted(daily)
-        if not dates:
+            hourly[row["captured_at"][:13]] = row
+        stamps = sorted(hourly)
+        if not stamps:
             ax.text(0.5, 0.5, "История капитала начнёт накапливаться после изменений в счёте или портфеле",
                     color=MUTED, ha="center", va="center", transform=ax.transAxes)
             style_axes(ax)
             ax.set_xticks([])
             self.history_canvas.draw_idle()
             return
-        x = list(range(len(dates)))
-        net_worth = [daily[key]["net_worth_cents"] / 100 for key in dates]
-        portfolio = [daily[key]["portfolio_value_cents"] / 100 for key in dates]
+        x = list(range(len(stamps)))
+        net_worth = [hourly[key]["net_worth_cents"] / 100 for key in stamps]
+        portfolio = [hourly[key]["portfolio_value_cents"] / 100 for key in stamps]
         ax.plot(x, net_worth, marker="o" if len(x) < 20 else None,
                 linewidth=2, color=ACCENT, label="Общий капитал")
         ax.plot(x, portfolio, marker="o" if len(x) < 20 else None,
                 linewidth=1.6, color=UP, label="Портфель")
         ax.set_xticks(x)
-        step = max(1, len(dates) // 10)
-        ax.set_xticklabels([d if i % step == 0 or i == len(dates)-1 else ""
-                            for i, d in enumerate(dates)],
-                           rotation=30, ha="right", color=MUTED, fontsize=8)
+        step = max(1, len(stamps) // 10)
+        labels = [datetime.fromisoformat(key + ":00").strftime("%d.%m %H:%M")
+                  if i % step == 0 or i == len(stamps)-1 else ""
+                  for i, key in enumerate(stamps)]
+        ax.set_xticklabels(labels, rotation=30, ha="right", color=MUTED, fontsize=8)
         ax.yaxis.set_major_formatter(lambda value, _pos: f"{value:,.0f}".replace(",", " "))
         ax.legend(frameon=False, labelcolor=MUTED, fontsize=8)
         ax.set_ylabel("Рубли", color=MUTED, fontsize=8)
@@ -1060,12 +1070,11 @@ class ReportsPage(QWidget):
             snapshots = conn.execute(
                 "SELECT * FROM financial_snapshots ORDER BY captured_at"
             ).fetchall()
-            realized_query = "SELECT COALESCE(SUM(realized_pnl_cents),0) FROM trades"
-            realized_params = ()
-            if start is not None:
-                realized_query += " WHERE trade_date >= ?"
-                realized_params = (start,)
-            realized_pnl = conn.execute(realized_query, realized_params).fetchone()[0]
+            realized_query = (
+                "SELECT COALESCE((SELECT SUM(realized_pnl_cents) FROM trades WHERE (? IS NULL OR trade_date >= ?)),0) + "
+                "COALESCE((SELECT SUM(realized_pnl_cents) FROM bond_trades WHERE (? IS NULL OR trade_date >= ?)),0)"
+            )
+            realized_pnl = conn.execute(realized_query, (start, start, start, start)).fetchone()[0]
 
         operations = [
             row for row in all_operations
@@ -1320,14 +1329,20 @@ class StockMarketPage(QWidget):
         previous=None
         for i,row in enumerate(shown):
             price=int(row["price_cents"])
-            change=price-previous if previous is not None else 0
-            pct=(change/previous*100) if previous else 0
-            direction="Рост" if change>0 else ("Падение" if change<0 else "Без изменения")
+            if previous is None:
+                change_text = pct_text = direction = "—"
+                change_color = None
+            else:
+                change=price-previous
+                pct=(change/previous*100) if previous else 0
+                direction="Рост" if change>0 else ("Падение" if change<0 else "Без изменения")
+                change_text=("+" if change>0 else "")+money(change)
+                pct_text=f"{pct:+.2f}%"
+                change_color=UP if change>0 else DOWN if change<0 else None
             vals=[datetime.fromisoformat(row["simulated_at"]).strftime("%d.%m.%Y %H:%M"),
-                  money(price),("+" if change>0 else "")+money(change),
-                  f"{pct:+.2f}%",direction]
+                  money(price),change_text,pct_text,direction]
             for col,value in enumerate(vals):
-                put(self.price_history,i,col,value,(UP if change>0 else DOWN) if col in (2,3,4) else None)
+                put(self.price_history,i,col,value,change_color if col in (2,3,4) else None)
             previous=price
 
     def execute_trade(self, side):
@@ -1370,7 +1385,7 @@ class StockMarketPage(QWidget):
                     """INSERT INTO trades(
                            trade_date,ticker,side,quantity,price_cents,total_cents,realized_pnl_cents
                        ) VALUES(?,?,?,?,?,?,?)""",
-                    (date.today().isoformat(), ticker, side, quantity, price, total, realized_pnl)
+                    (simulated_datetime(conn).date().isoformat(), ticker, side, quantity, price, total, realized_pnl)
                 )
                 record_financial_snapshot(conn)
             action = "Куплено" if side == "BUY" else "Продано"
