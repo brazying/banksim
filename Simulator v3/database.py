@@ -308,36 +308,60 @@ def cash_balance(conn):
     return int(income - expense + stock_cash + bond_cash + coupons + redemptions)
 
 
+
+def portfolio_positions(conn):
+    """Единый список открытых позиций без повторного учёта ручных активов."""
+    stock_rows = conn.execute("""
+        SELECT h.ticker,h.quantity,h.average_price_cents,s.price_cents,s.name
+        FROM holdings h JOIN stocks s ON s.ticker=h.ticker
+        WHERE h.quantity>0 ORDER BY h.ticker
+    """).fetchall()
+    bond_rows = conn.execute("""
+        SELECT h.ticker,h.quantity,h.average_price_cents,b.price_cents,b.name
+        FROM bond_holdings h JOIN bonds b ON b.ticker=h.ticker
+        WHERE h.quantity>0 ORDER BY h.ticker
+    """).fetchall()
+
+    market_tickers = {row["ticker"].upper() for row in stock_rows}
+    bond_tickers = {row["ticker"].upper() for row in bond_rows}
+    positions = []
+
+    for row in conn.execute("SELECT * FROM assets ORDER BY name").fetchall():
+        ticker = (row["ticker"] or "").strip().upper()
+        if ticker and (ticker in market_tickers or ticker in bond_tickers):
+            continue
+        positions.append((
+            row["name"], ticker, float(row["quantity"]),
+            int(row["average_price_cents"]), int(row["current_price_cents"]),
+            "Ручной актив"
+        ))
+
+    positions.extend((
+        row["name"], row["ticker"], float(row["quantity"]),
+        int(row["average_price_cents"]), int(row["price_cents"]), "Акции"
+    ) for row in stock_rows)
+    positions.extend((
+        row["name"] + " · облигация", row["ticker"], float(row["quantity"]),
+        int(row["average_price_cents"]), int(row["price_cents"]), "Облигации"
+    ) for row in bond_rows)
+
+    return positions
+
+
+def portfolio_totals(conn):
+    """Возвращает позиции, себестоимость и текущую рыночную стоимость в копейках."""
+    positions = portfolio_positions(conn)
+    cost = sum(int(round(qty * average)) for _, _, qty, average, _, _ in positions)
+    value = sum(int(round(qty * current)) for _, _, qty, _, current, _ in positions)
+    return positions, cost, value
+
+
 def record_financial_snapshot(conn):
     """Сохранить снимок капитала с отметкой единого симулируемого времени."""
 
     cash = cash_balance(conn)
 
-    manual = conn.execute("""
-        SELECT COALESCE(SUM(CAST(ROUND(a.quantity * a.average_price_cents) AS INTEGER)),0) AS cost,
-               COALESCE(SUM(CAST(ROUND(a.quantity * a.current_price_cents) AS INTEGER)),0) AS value
-        FROM assets a
-        WHERE NOT EXISTS (
-            SELECT 1 FROM holdings h
-            WHERE h.ticker = UPPER(a.ticker) AND h.quantity > 0
-        )
-    """).fetchone()
-    market = conn.execute("""
-        SELECT COALESCE(SUM(CAST(ROUND(h.quantity * h.average_price_cents) AS INTEGER)),0) AS cost,
-               COALESCE(SUM(CAST(ROUND(h.quantity * s.price_cents) AS INTEGER)),0) AS value
-        FROM holdings h JOIN stocks s ON s.ticker=h.ticker
-        WHERE h.quantity > 0
-    """).fetchone()
-    bonds_value = conn.execute("""
-        SELECT COALESCE(SUM(CAST(ROUND(h.quantity*b.price_cents) AS INTEGER)),0)
-        FROM bond_holdings h JOIN bonds b ON b.ticker=h.ticker WHERE h.quantity>0
-    """).fetchone()[0]
-    bonds_cost = conn.execute("""
-        SELECT COALESCE(SUM(CAST(ROUND(h.quantity*h.average_price_cents) AS INTEGER)),0)
-        FROM bond_holdings h WHERE h.quantity>0
-    """).fetchone()[0]
-    portfolio_cost = int(manual["cost"] + market["cost"] + bonds_cost)
-    portfolio_value = int(manual["value"] + market["value"] + bonds_value)
+    _, portfolio_cost, portfolio_value = portfolio_totals(conn)
     captured_at = simulated_datetime(conn).isoformat(timespec="seconds")
     # Один снимок на один симулируемый час: повторные действия в тот же час
     # обновляют его, а не создают дубли.
