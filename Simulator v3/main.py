@@ -1,6 +1,6 @@
 import sys
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel, QStackedWidget, QFrame
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from database import init_db
 from pages import DashboardPage, AccountPage, PortfolioPage, DepositPage, SimulationPage, ReportsPage, StockMarketPage, BondsPage
 from theme import STYLE
@@ -29,11 +29,13 @@ class MainWindow(QMainWindow):
         side.addSpacing(20)
 
         self.stack = QStackedWidget()
+        self.stock_market_page = StockMarketPage()
+        self.bonds_page = BondsPage()
         pages = [
             ("Обзор", DashboardPage()),
             ("Банковский счёт", AccountPage()),
-            ("Биржа", StockMarketPage()),
-            ("Облигации", BondsPage()),
+            ("Биржа", self.stock_market_page),
+            ("Облигации", self.bonds_page),
             ("Портфель", PortfolioPage()),
             ("Вклады", DepositPage()),
             ("Моделирование", SimulationPage()),
@@ -60,6 +62,15 @@ class MainWindow(QMainWindow):
         root.addWidget(content, 1)
         self.setCentralWidget(central)
         self.refresh_all()
+        # Единственный таймер рынка: 15 секунд реального времени = 1 час симуляции.
+        self.market_timer = QTimer(self)
+        self.market_timer.setInterval(15000)
+        self.market_timer.timeout.connect(self.advance_market_hour)
+        self.market_timer.start()
+
+    def advance_market_hour(self):
+        self.stock_market_page.move_market()
+        self.bonds_page.move_bond_market()
 
     def navigate(self, index):
         self.stack.setCurrentIndex(index)
