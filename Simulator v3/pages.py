@@ -534,7 +534,7 @@ class BondsPage(QWidget):
     def refresh(self):
         with connect() as conn:
             self.process_coupon_payments(conn)
-            rows = conn.execute("SELECT * FROM bonds ORDER BY issuer_type,ticker").fetchall()
+            rows = conn.execute("SELECT * FROM bonds WHERE maturity_date>? ORDER BY issuer_type,ticker", (date.today().isoformat(),)).fetchall()
             positions = conn.execute("""
                 SELECT h.*,b.name,b.price_cents,b.face_value_cents,b.coupon_rate,b.maturity_date
                 FROM bond_holdings h JOIN bonds b ON b.ticker=h.ticker
@@ -587,6 +587,8 @@ class BondsPage(QWidget):
         try:
             with connect() as conn:
                 bond=conn.execute("SELECT * FROM bonds WHERE ticker=?",(ticker,)).fetchone()
+                if not bond or bond["maturity_date"] <= date.today().isoformat():
+                    raise ValueError("Срок обращения этого выпуска завершён.")
                 holding=conn.execute("SELECT * FROM bond_holdings WHERE ticker=?",(ticker,)).fetchone()
                 price=bond["price_cents"]
                 total=price*qty
