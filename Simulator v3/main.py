@@ -71,6 +71,11 @@ class MainWindow(QMainWindow):
     def advance_market_hour(self):
         self.stock_market_page.move_market()
         self.bonds_page.move_bond_market()
+        # Страницы, не являющиеся рынками, тоже должны показывать актуальные
+        # деньги и стоимость портфеля после купонов, погашений и переоценки.
+        current = self.stack.currentWidget()
+        if current not in (self.stock_market_page, self.bonds_page) and hasattr(current, "refresh"):
+            current.refresh()
 
     def navigate(self, index):
         self.stack.setCurrentIndex(index)
