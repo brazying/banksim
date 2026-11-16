@@ -127,7 +127,8 @@ def cash_balance(conn):
         "SELECT COALESCE(SUM(CASE WHEN side='SELL' THEN total_cents ELSE -total_cents END),0) FROM bond_trades"
     ).fetchone()[0]
     coupons = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM bond_coupon_payments").fetchone()[0]
-    return income - expense + trade_cash + bond_trade_cash + coupons
+    redemptions = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM bond_redemptions").fetchone()[0]
+    return income - expense + trade_cash + bond_trade_cash + coupons + redemptions
 
 
 def operation_rows(conn):
@@ -136,6 +137,7 @@ def operation_rows(conn):
     trades = conn.execute("SELECT * FROM trades").fetchall()
     bond_trades = conn.execute("SELECT * FROM bond_trades").fetchall()
     coupons = conn.execute("SELECT * FROM bond_coupon_payments").fetchall()
+    redemptions = conn.execute("SELECT * FROM bond_redemptions").fetchall()
 
     for row in transactions:
         plus = row["tx_type"] in ("Income", "Deposit")
@@ -173,6 +175,13 @@ def operation_rows(conn):
             "date": row["payment_date"], "id": row["id"], "source": 3,
             "type": "Выплата купона", "category": "Купонный доход",
             "description": row["ticker"] + " · полугодовая выплата",
+            "amount": "+" + money(row["amount_cents"]), "delta": row["amount_cents"],
+        })
+    for row in redemptions:
+        rows.append({
+            "date": row["payment_date"], "id": row["id"], "source": 4,
+            "type": "Погашение облигации", "category": "Погашение",
+            "description": row["ticker"] + " · возврат номинала",
             "amount": "+" + money(row["amount_cents"]), "delta": row["amount_cents"],
         })
     rows.sort(key=lambda item: (item["date"], item["id"], item["source"]), reverse=True)
@@ -495,6 +504,15 @@ class BondsPage(QWidget):
                              (bond["next_coupon_date"], bond["ticker"], quantity, amount))
             next_date = add_months(date.fromisoformat(bond["next_coupon_date"]), 6)
             conn.execute("UPDATE bonds SET next_coupon_date=? WHERE ticker=?", (next_date.isoformat(), bond["ticker"]))
+        matured = conn.execute("SELECT * FROM bonds WHERE maturity_date<=?", (today.isoformat(),)).fetchall()
+        for bond in matured:
+            holding = conn.execute("SELECT quantity FROM bond_holdings WHERE ticker=?", (bond["ticker"],)).fetchone()
+            quantity = float(holding["quantity"]) if holding else 0.0
+            if quantity > 0:
+                redemption = int(round(quantity * bond["face_value_cents"]))
+                conn.execute("INSERT INTO bond_redemptions(payment_date,ticker,quantity,amount_cents) VALUES(?,?,?,?)",
+                             (bond["maturity_date"], bond["ticker"], quantity, redemption))
+                conn.execute("UPDATE bond_holdings SET quantity=0,average_price_cents=0 WHERE ticker=?", (bond["ticker"],))
 
     def refresh(self):
         with connect() as conn:
