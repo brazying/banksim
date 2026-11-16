@@ -494,25 +494,42 @@ class BondsPage(QWidget):
 
     def process_coupon_payments(self, conn):
         today = date.today()
-        due = conn.execute("SELECT * FROM bonds WHERE next_coupon_date<=? AND next_coupon_date<=maturity_date", (today.isoformat(),)).fetchall()
-        for bond in due:
-            holding = conn.execute("SELECT quantity FROM bond_holdings WHERE ticker=?", (bond["ticker"],)).fetchone()
+        bonds = conn.execute("SELECT * FROM bonds").fetchall()
+        for bond in bonds:
+            next_date = date.fromisoformat(bond["next_coupon_date"])
+            maturity = date.fromisoformat(bond["maturity_date"])
+            holding = conn.execute(
+                "SELECT quantity FROM bond_holdings WHERE ticker=?", (bond["ticker"],)
+            ).fetchone()
             quantity = float(holding["quantity"]) if holding else 0.0
-            if quantity > 0:
-                amount = int(round(quantity * bond["face_value_cents"] * bond["coupon_rate"] / 100 / 2))
-                conn.execute("INSERT INTO bond_coupon_payments(payment_date,ticker,quantity,amount_cents) VALUES(?,?,?,?)",
-                             (bond["next_coupon_date"], bond["ticker"], quantity, amount))
-            next_date = add_months(date.fromisoformat(bond["next_coupon_date"]), 6)
-            conn.execute("UPDATE bonds SET next_coupon_date=? WHERE ticker=?", (next_date.isoformat(), bond["ticker"]))
-        matured = conn.execute("SELECT * FROM bonds WHERE maturity_date<=?", (today.isoformat(),)).fetchall()
-        for bond in matured:
-            holding = conn.execute("SELECT quantity FROM bond_holdings WHERE ticker=?", (bond["ticker"],)).fetchone()
-            quantity = float(holding["quantity"]) if holding else 0.0
-            if quantity > 0:
+
+            # Если приложение долго не запускалось, начисляем все пропущенные купоны,
+            # сохраняя исходные даты выплат и полугодовой интервал.
+            while next_date <= today and next_date <= maturity:
+                if quantity > 0:
+                    amount = int(round(
+                        quantity * bond["face_value_cents"] * bond["coupon_rate"] / 100 / 2
+                    ))
+                    conn.execute(
+                        "INSERT INTO bond_coupon_payments(payment_date,ticker,quantity,amount_cents) VALUES(?,?,?,?)",
+                        (next_date.isoformat(), bond["ticker"], quantity, amount)
+                    )
+                next_date = add_months(next_date, 6)
+                conn.execute(
+                    "UPDATE bonds SET next_coupon_date=? WHERE ticker=?",
+                    (next_date.isoformat(), bond["ticker"])
+                )
+
+            if maturity <= today and quantity > 0:
                 redemption = int(round(quantity * bond["face_value_cents"]))
-                conn.execute("INSERT INTO bond_redemptions(payment_date,ticker,quantity,amount_cents) VALUES(?,?,?,?)",
-                             (bond["maturity_date"], bond["ticker"], quantity, redemption))
-                conn.execute("UPDATE bond_holdings SET quantity=0,average_price_cents=0 WHERE ticker=?", (bond["ticker"],))
+                conn.execute(
+                    "INSERT INTO bond_redemptions(payment_date,ticker,quantity,amount_cents) VALUES(?,?,?,?)",
+                    (bond["maturity_date"], bond["ticker"], quantity, redemption)
+                )
+                conn.execute(
+                    "UPDATE bond_holdings SET quantity=0,average_price_cents=0 WHERE ticker=?",
+                    (bond["ticker"],)
+                )
 
     def refresh(self):
         with connect() as conn:
