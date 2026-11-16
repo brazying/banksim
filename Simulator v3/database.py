@@ -1,6 +1,15 @@
 import sqlite3
 from pathlib import Path
 from datetime import date
+import calendar
+
+
+def add_months(value, months):
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return value.replace(year=year, month=month, day=day)
 
 DB_PATH = Path(__file__).parent / "data" / "ledger.sqlite3"
 
@@ -177,7 +186,6 @@ def init_db():
         conn.executemany("INSERT OR IGNORE INTO stocks(ticker,name,price_cents,previous_price_cents,volatility) VALUES(?,?,?,?,?)", stocks)
         conn.execute("INSERT OR IGNORE INTO holdings(ticker, quantity, average_price_cents) SELECT ticker, 0, 0 FROM stocks")
         from datetime import date
-        from dateutil.relativedelta import relativedelta
         bond_rows = [
             ("OFZ-26238","ОФЗ 26238","Государственная",100_000,98_500,98_500,7.1,5,0.0010),
             ("OFZ-26240","ОФЗ 26240","Государственная",100_000,96_800,96_800,7.0,7,0.0012),
@@ -192,8 +200,8 @@ def init_db():
         ]
         today = date.today()
         for ticker,name,kind,face,price,prev,coupon,term,vol in bond_rows:
-            maturity = today + relativedelta(years=term)
-            next_coupon = today + relativedelta(months=6)
+            maturity = today.replace(year=today.year + term)
+            next_coupon = add_months(today, 6)
             conn.execute(
                 """INSERT OR IGNORE INTO bonds(
                     ticker,name,issuer_type,face_value_cents,price_cents,previous_price_cents,
