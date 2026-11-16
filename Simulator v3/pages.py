@@ -6,7 +6,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushBut
 from PyQt6.QtCore import Qt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-from database import connect
+from database import connect, record_financial_snapshot
 from finance import to_cents, money, compound_interest, projected_value, monte_carlo, monte_carlo_price_step
 from charts import CapitalChart, AllocationChart, style_axes
 from theme import *
@@ -280,6 +280,7 @@ class AccountPage(QWidget):
                         return
                 conn.execute("INSERT INTO transactions(tx_date,tx_type,category,description,amount_cents) VALUES(?,?,?,?,?)",
                     (date.today().isoformat(), tx_type, category, self.description.text().strip(), cents))
+                record_financial_snapshot(conn)
             self.category.clear()
             self.description.clear()
             self.amount.setValue(0.01)
@@ -349,6 +350,7 @@ class PortfolioPage(QWidget):
                     VALUES(?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET ticker=excluded.ticker, quantity=excluded.quantity,
                     average_price_cents=excluded.average_price_cents,current_price_cents=excluded.current_price_cents""",
                     (name, self.ticker.text().strip().upper(), qty, avg, current))
+                record_financial_snapshot(conn)
             self.name.clear()
             self.ticker.clear()
             self.refresh()
@@ -888,6 +890,7 @@ class StockMarketPage(QWidget):
                     "price_cents=?, updated_at=CURRENT_TIMESTAMP WHERE ticker=?",
                     (new_price, stock["ticker"]),
                 )
+            record_financial_snapshot(conn)
         self.refresh()
 
     def execute_trade(self, side):
@@ -925,8 +928,14 @@ class StockMarketPage(QWidget):
                     new_qty = round(held - quantity, 4)
                     conn.execute("UPDATE holdings SET quantity=?, average_price_cents=CASE WHEN ?=0 THEN 0 ELSE average_price_cents END WHERE ticker=?",
                                  (new_qty, new_qty, ticker))
-                conn.execute("INSERT INTO trades(trade_date,ticker,side,quantity,price_cents,total_cents) VALUES(?,?,?,?,?,?)",
-                             (date.today().isoformat(), ticker, side, quantity, price, total))
+                realized_pnl = int(round(quantity * (price - holding["average_price_cents"]))) if side == "SELL" else 0
+                conn.execute(
+                    """INSERT INTO trades(
+                           trade_date,ticker,side,quantity,price_cents,total_cents,realized_pnl_cents
+                       ) VALUES(?,?,?,?,?,?,?)""",
+                    (date.today().isoformat(), ticker, side, quantity, price, total, realized_pnl)
+                )
+                record_financial_snapshot(conn)
             action = "Куплено" if side == "BUY" else "Продано"
             QMessageBox.information(self, "Сделка выполнена", f"{action} {quantity:.2f} акций {ticker} по {money(price)} за штуку.\nСумма: {money(total)}.")
             self.refresh()
