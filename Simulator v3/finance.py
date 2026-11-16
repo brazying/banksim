@@ -27,10 +27,6 @@ def projected_value(initial_cents, annual_rate_percent, years):
                .quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 def monte_carlo(initial_cents, annual_return_percent, volatility_percent, years, simulations=1000):
-    """Run Monte Carlo paths using annual lognormal returns.
-
-    Returns final values in cents, summary statistics, and sample paths in rubles.
-    """
     import math
     import random
     from statistics import mean, median
