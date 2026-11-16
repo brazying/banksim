@@ -113,7 +113,7 @@ def signed(row):
     return ("+" if plus else "−") + money(row["amount_cents"])
 
 def cash_balance(conn):
-    """Единый денежный баланс: операции по счёту с учётом покупок и продаж акций."""
+    """Единый денежный баланс: операции по счёту, акции, облигации, купоны и погашения."""
     income = conn.execute(
         "SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type IN ('Income','Deposit')"
     ).fetchone()[0]
@@ -494,7 +494,7 @@ class BondsPage(QWidget):
 
     def process_coupon_payments(self, conn):
         today = date.today()
-        due = conn.execute("SELECT * FROM bonds WHERE next_coupon_date<=? AND next_coupon_date<maturity_date", (today.isoformat(),)).fetchall()
+        due = conn.execute("SELECT * FROM bonds WHERE next_coupon_date<=? AND next_coupon_date<=maturity_date", (today.isoformat(),)).fetchall()
         for bond in due:
             holding = conn.execute("SELECT quantity FROM bond_holdings WHERE ticker=?", (bond["ticker"],)).fetchone()
             quantity = float(holding["quantity"]) if holding else 0.0
@@ -882,7 +882,7 @@ class ReportsPage(QWidget):
         configure_table(self.history)
         layout.addWidget(wrap(self.history))
 
-        self.note = QLabel("Поступления и списания включают банковские операции и сделки с акциями. "
+        self.note = QLabel("Поступления и списания включают банковские операции, сделки с акциями и облигациями, купоны и погашения. "
                            "Текущий баланс и оценка портфеля показывают состояние на сегодня.")
         self.note.setWordWrap(True)
         self.note.setObjectName("Muted")
@@ -913,6 +913,15 @@ class ReportsPage(QWidget):
         positions.extend(
             (row["quantity"], row["average_price_cents"], row["price_cents"])
             for row in market
+        )
+        bonds = conn.execute("""
+            SELECT h.quantity,h.average_price_cents,b.price_cents
+            FROM bond_holdings h JOIN bonds b ON b.ticker=h.ticker
+            WHERE h.quantity>0
+        """).fetchall()
+        positions.extend(
+            (row["quantity"], row["average_price_cents"], row["price_cents"])
+            for row in bonds
         )
         cost = sum(int(qty * avg) for qty, avg, _ in positions)
         value = sum(int(qty * current) for qty, _, current in positions)
