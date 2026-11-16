@@ -440,12 +440,18 @@ class BondsPage(QWidget):
             holding = conn.execute(
                 "SELECT quantity,average_price_cents FROM bond_holdings WHERE ticker=?", (bond["ticker"],)
             ).fetchone()
-            quantity = float(holding["quantity"]) if holding else 0.0
+            current_quantity = float(holding["quantity"]) if holding else 0.0
             average_price = int(holding["average_price_cents"]) if holding else 0
 
-            # Если приложение долго не запускалось, начисляем все пропущенные купоны,
-            # сохраняя исходные даты выплат и полугодовой интервал.
+            # Купон получает количество облигаций, находившееся в портфеле на дату выплаты.
             while next_date <= today and next_date <= maturity:
+                payment_cutoff = next_date.isoformat() + "T00:00:00"
+                eligible = conn.execute(
+                    """SELECT COALESCE(SUM(CASE WHEN side='BUY' THEN quantity ELSE -quantity END),0)
+                       FROM bond_trades WHERE ticker=? AND trade_date<=?""",
+                    (bond["ticker"], payment_cutoff)
+                ).fetchone()[0]
+                quantity = max(0.0, float(eligible or 0.0))
                 if quantity > 0:
                     amount = int(round(
                         quantity * bond["face_value_cents"] * bond["coupon_rate"] / 100 / 2
@@ -460,15 +466,26 @@ class BondsPage(QWidget):
                     (next_date.isoformat(), bond["ticker"])
                 )
 
-            if maturity <= today and quantity > 0:
-                redemption = int(round(quantity * bond["face_value_cents"]))
-                realized_pnl = int(round(quantity * (bond["face_value_cents"] - average_price)))
-                conn.execute(
-                    """INSERT INTO bond_redemptions(
-                           payment_date,ticker,quantity,amount_cents,realized_pnl_cents
-                       ) VALUES(?,?,?,?,?)""",
-                    (bond["maturity_date"], bond["ticker"], quantity, redemption, realized_pnl)
-                )
+            redemption_exists = conn.execute(
+                "SELECT 1 FROM bond_redemptions WHERE ticker=? LIMIT 1", (bond["ticker"],)
+            ).fetchone()
+            if maturity <= today and current_quantity > 0 and not redemption_exists:
+                redemption_cutoff = maturity.isoformat() + "T23:59:59"
+                eligible = conn.execute(
+                    """SELECT COALESCE(SUM(CASE WHEN side='BUY' THEN quantity ELSE -quantity END),0)
+                       FROM bond_trades WHERE ticker=? AND trade_date<=?""",
+                    (bond["ticker"], redemption_cutoff)
+                ).fetchone()[0]
+                quantity = max(0.0, float(eligible or 0.0))
+                if quantity > 0:
+                    redemption = int(round(quantity * bond["face_value_cents"]))
+                    realized_pnl = int(round(quantity * (bond["face_value_cents"] - average_price)))
+                    conn.execute(
+                        """INSERT INTO bond_redemptions(
+                               payment_date,ticker,quantity,amount_cents,realized_pnl_cents
+                           ) VALUES(?,?,?,?,?)""",
+                        (bond["maturity_date"], bond["ticker"], quantity, redemption, realized_pnl)
+                    )
                 conn.execute(
                     "UPDATE bond_holdings SET quantity=0,average_price_cents=0 WHERE ticker=?",
                     (bond["ticker"],)
@@ -814,7 +831,8 @@ class ReportsPage(QWidget):
         self.value_metric = metric("Стоимость портфеля · сейчас", "—")
         self.unrealized_metric = metric("Нереализованный P&L · сейчас", "—")
         self.realized_metric = metric("Реализованный P&L · период", "—")
-        for item in (self.buy_metric, self.value_metric, self.unrealized_metric, self.realized_metric):
+        self.coupon_metric = metric("Купонный доход · период", "—")
+        for item in (self.buy_metric, self.value_metric, self.unrealized_metric, self.realized_metric, self.coupon_metric):
             row2.addWidget(item, 1)
         layout.addLayout(row2)
 
@@ -866,7 +884,8 @@ class ReportsPage(QWidget):
             "Поступления и списания показывают фактическое движение денег: продажа актива считается поступлением на всю сумму, "
             "покупка — списанием на всю сумму. Реализованный P&L считается отдельно относительно себестоимости проданных позиций. "
             "Нереализованный P&L — текущая разница между стоимостью открытых позиций и их себестоимостью. "
-            "Текущие остатки не меняются при выборе исторического периода."
+            "Купонный доход показан отдельно и не включён в реализованный P&L. "
+            "Текущие остатки и нереализованный результат не меняются при выборе исторического периода."
         )
         note.setWordWrap(True)
         note.setObjectName("Muted")
@@ -1009,15 +1028,15 @@ class ReportsPage(QWidget):
         self.allocation_figure.tight_layout()
         self.allocation_canvas.draw_idle()
 
-    def _draw_pnl(self, realized, unrealized):
+    def _draw_pnl(self, realized, unrealized, coupons):
         ax = self.pnl_axes
         ax.clear()
         ax.set_facecolor(SURFACE)
-        values = [realized / 100, unrealized / 100]
-        labels = ["Реализованный · за период", "Нереализованный · сейчас"]
-        bars = ax.bar(labels, values, color=[UP if v >= 0 else DOWN for v in values], width=0.48)
+        values = [realized / 100, unrealized / 100, coupons / 100]
+        labels = ["Реализованный · период", "Нереализованный · сейчас", "Купоны · период"]
+        bars = ax.bar(range(3), values, color=[UP if v >= 0 else DOWN for v in values], width=0.48)
         ax.axhline(0, color=LINE, linewidth=0.8)
-        ax.set_xticks(range(2))
+        ax.set_xticks(range(3))
         ax.set_xticklabels(labels, color=MUTED, fontsize=8)
         for bar, value in zip(bars, values):
             offset = 4 if value >= 0 else -12
@@ -1048,6 +1067,7 @@ class ReportsPage(QWidget):
             realized = int(conn.execute(realized_sql, (start, start, start, start, start, start)).fetchone()[0] or 0)
 
         operations = [row for row in all_operations if start is None or row["date"][:10] >= start]
+        coupon_income = sum(row["delta"] for row in operations if row["type"] == "Выплата купона")
         inflows = sum(row["delta"] for row in operations if row["delta"] > 0)
         outflows = -sum(row["delta"] for row in operations if row["delta"] < 0)
         net_flow = inflows - outflows
@@ -1063,6 +1083,7 @@ class ReportsPage(QWidget):
         self.value_metric.value_label.setText(money(portfolio_value))
         self.unrealized_metric.value_label.setText(("+" if unrealized > 0 else "") + money(unrealized))
         self.realized_metric.value_label.setText(("+" if realized > 0 else "") + money(realized))
+        self.coupon_metric.value_label.setText(("+" if coupon_income > 0 else "") + money(coupon_income))
 
         grouped = {}
         for row in operations:
@@ -1087,7 +1108,7 @@ class ReportsPage(QWidget):
         self._draw_expenses(operations)
         self._draw_capital(filtered_snapshots)
         self._draw_allocation(positions)
-        self._draw_pnl(realized, unrealized)
+        self._draw_pnl(realized, unrealized, coupon_income)
 
 
 class StockMarketPage(QWidget):
