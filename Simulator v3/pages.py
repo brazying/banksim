@@ -570,16 +570,23 @@ class ReportsPage(QWidget):
         layout.setContentsMargins(0, 8, 8, 8)
         layout.setSpacing(12)
 
-        metrics = QHBoxLayout()
+        metrics_top = QHBoxLayout()
         self.income_metric = metric("Поступления за период", "—")
         self.expense_metric = metric("Списания за период", "—")
         self.net_metric = metric("Денежный поток", "—", hero=True)
         self.balance_metric = metric("Текущий баланс", "—")
-        self.pnl_metric = metric("Прибыль портфеля", "—")
-        for item in (self.income_metric, self.expense_metric, self.net_metric,
-                     self.balance_metric, self.pnl_metric):
-            metrics.addWidget(item, 1)
-        layout.addLayout(metrics)
+        for item in (self.income_metric, self.expense_metric,
+                     self.net_metric, self.balance_metric):
+            metrics_top.addWidget(item, 1)
+        layout.addLayout(metrics_top)
+
+        metrics_bottom = QHBoxLayout()
+        self.invested_metric = metric("Вложено в портфель", "—")
+        self.value_metric = metric("Текущая стоимость портфеля", "—")
+        self.pnl_metric = metric("Прибыль / убыток по открытым позициям", "—")
+        for item in (self.invested_metric, self.value_metric, self.pnl_metric):
+            metrics_bottom.addWidget(item, 1)
+        layout.addLayout(metrics_bottom)
 
         charts = QHBoxLayout()
         flow_box = QGroupBox("Движение денег по месяцам")
@@ -736,6 +743,8 @@ class ReportsPage(QWidget):
         self.expense_metric.value_label.setText(money(expense))
         self.net_metric.value_label.setText(("+" if net > 0 else "") + money(net))
         self.balance_metric.value_label.setText(money(balance))
+        self.invested_metric.value_label.setText(money(cost))
+        self.value_metric.value_label.setText(money(portfolio_value))
         self.pnl_metric.value_label.setText(("+" if pnl > 0 else "") + money(pnl))
 
         grouped = {}
