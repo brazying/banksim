@@ -112,6 +112,13 @@ def init_db():
             quantity REAL NOT NULL,
             amount_cents INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS bond_redemptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            payment_date TEXT NOT NULL,
+            ticker TEXT NOT NULL REFERENCES bonds(ticker),
+            quantity REAL NOT NULL,
+            amount_cents INTEGER NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS financial_snapshots (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             captured_at TEXT NOT NULL,
@@ -200,7 +207,7 @@ def init_db():
         ]
         today = date.today()
         for ticker,name,kind,face,price,prev,coupon,term,vol in bond_rows:
-            maturity = today.replace(year=today.year + term)
+            maturity = add_months(today, term * 12)
             next_coupon = add_months(today, 6)
             conn.execute(
                 """INSERT OR IGNORE INTO bonds(
@@ -235,7 +242,8 @@ def record_financial_snapshot(conn):
         "SELECT COALESCE(SUM(CASE WHEN side='SELL' THEN total_cents ELSE -total_cents END),0) FROM bond_trades"
     ).fetchone()[0]
     coupons = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM bond_coupon_payments").fetchone()[0]
-    cash = int(income - expense + trade_cash + bond_trade_cash + coupons)
+    redemptions = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM bond_redemptions").fetchone()[0]
+    cash = int(income - expense + trade_cash + bond_trade_cash + coupons + redemptions)
 
     manual = conn.execute("""
         SELECT COALESCE(SUM(CAST(ROUND(a.quantity * a.average_price_cents) AS INTEGER)),0) AS cost,
