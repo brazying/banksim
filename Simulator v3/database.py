@@ -185,6 +185,10 @@ def init_db():
                     conn.execute("UPDATE bond_trades SET realized_pnl_cents=? WHERE id=?", (realized, trade["id"]))
                     positions[trade["ticker"]] = (max(0.0, qty - trade["quantity"]), average)
 
+        redemption_columns = {row["name"] for row in conn.execute("PRAGMA table_info(bond_redemptions)")}
+        if "realized_pnl_cents" not in redemption_columns:
+            conn.execute("ALTER TABLE bond_redemptions ADD COLUMN realized_pnl_cents INTEGER NOT NULL DEFAULT 0")
+
         stocks = [
             ("AAPL", "Apple Inc.", 23_000, 23_000, 0.010),
             ("MSFT", "Microsoft Corp.", 42_000, 42_000, 0.009),
