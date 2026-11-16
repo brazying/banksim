@@ -22,7 +22,7 @@ TRANSACTION_LABELS = {
 }
 
 NUMERIC = {"Сумма", "Цена", "Изменение", "Изменение, %", "Итого", "Количество", "Кол-во",
-           "Средняя покупка", "Ср. покупка", "Текущая", "Текущая стоимость", "Прибыль / убыток"}
+           "Средняя покупка", "Ср. покупка", "Текущая", "Текущая стоимость", "Прибыль / убыток", "Прибыль / убыток, %"}
 RIGHT = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
 LEFT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 
@@ -104,6 +104,20 @@ def signed(row):
     plus = row["tx_type"] in ("Income", "Deposit")
     return ("+" if plus else "−") + money(row["amount_cents"])
 
+def cash_balance(conn):
+    """Единый денежный баланс: операции по счёту с учётом покупок и продаж акций."""
+    income = conn.execute(
+        "SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type IN ('Income','Deposit')"
+    ).fetchone()[0]
+    expense = conn.execute(
+        "SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type IN ('Expense','Withdrawal')"
+    ).fetchone()[0]
+    trade_cash = conn.execute(
+        "SELECT COALESCE(SUM(CASE WHEN side='SELL' THEN total_cents ELSE -total_cents END),0) FROM trades"
+    ).fetchone()[0]
+    return income - expense + trade_cash
+
+
 def operation_rows(conn):
     rows = []
     transactions = conn.execute("SELECT * FROM transactions").fetchall()
@@ -169,12 +183,12 @@ class DashboardPage(QWidget):
     def refresh(self):
         with connect() as conn:
             rows = operation_rows(conn)[:8]
-            income = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type IN ('Income','Deposit')").fetchone()[0]
-            expense = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type IN ('Expense','Withdrawal')").fetchone()[0]
-            assets = conn.execute("SELECT name, quantity, current_price_cents FROM assets UNION ALL SELECT s.name || ' (' || s.ticker || ')', h.quantity, s.price_cents FROM holdings h JOIN stocks s ON s.ticker=h.ticker WHERE h.quantity > 0").fetchall()
-            trade_cash = conn.execute("SELECT COALESCE(SUM(CASE WHEN side='SELL' THEN total_cents ELSE -total_cents END),0) FROM trades").fetchone()[0]
+            balance = cash_balance(conn)
+            assets = conn.execute("SELECT name, quantity, current_price_cents FROM assets").fetchall()
+            market_assets = conn.execute("SELECT s.name || ' (' || s.ticker || ')', h.quantity, s.price_cents FROM holdings h JOIN stocks s ON s.ticker=h.ticker WHERE h.quantity > 0").fetchall()
+            assets = list(assets) + list(market_assets)
             all_operations = operation_rows(conn)
-        balance = income - expense + trade_cash
+        balance = balance
         portfolio = sum(int(row["quantity"] * row["current_price_cents"]) for row in assets)
         self.balance.value_label.setText(money(balance))
         self.portfolio.value_label.setText(money(portfolio))
@@ -243,10 +257,7 @@ class AccountPage(QWidget):
             tx_type = self.kind.currentData()
             with connect() as conn:
                 if tx_type in ("Expense", "Withdrawal"):
-                    income = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type IN ('Income','Deposit')").fetchone()[0]
-                    expense = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type IN ('Expense','Withdrawal')").fetchone()[0]
-                    trade_cash = conn.execute("SELECT COALESCE(SUM(CASE WHEN side='SELL' THEN total_cents ELSE -total_cents END),0) FROM trades").fetchone()[0]
-                    available = income - expense + trade_cash
+                    available = cash_balance(conn)
                     if available < cents:
                         shortfall = cents - available
                         QMessageBox.warning(
@@ -270,10 +281,8 @@ class AccountPage(QWidget):
     def refresh(self):
         with connect() as conn:
             rows = operation_rows(conn)
-            income = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type IN ('Income','Deposit')").fetchone()[0]
-            expense = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type IN ('Expense','Withdrawal')").fetchone()[0]
-            trade_cash = conn.execute("SELECT COALESCE(SUM(CASE WHEN side='SELL' THEN total_cents ELSE -total_cents END),0) FROM trades").fetchone()[0]
-        self.balance_label.setText(f"Текущий баланс: {money(income - expense + trade_cash)}")
+            balance = cash_balance(conn)
+        self.balance_label.setText(f"Текущий баланс: {money(balance)}")
         self.table.setRowCount(len(rows))
         for r, row in enumerate(rows):
             vals = [row["date"], row["type"], row["category"], row["description"], row["amount"]]
@@ -311,8 +320,8 @@ class PortfolioPage(QWidget):
         form.addRow("", add)
         layout.addWidget(box)
         layout.addWidget(section("Активы в портфеле"))
-        self.table = QTableWidget(0, 6)
-        self.table.setHorizontalHeaderLabels(["Название", "Тикер", "Кол-во", "Ср. покупка", "Текущая", "Прибыль / убыток"])
+        self.table = QTableWidget(0, 7)
+        self.table.setHorizontalHeaderLabels(["Название", "Тикер", "Кол-во", "Ср. покупка", "Текущая", "Прибыль / убыток", "Прибыль / убыток, %"])
         configure_table(self.table)
         layout.addWidget(wrap(self.table))
 
@@ -338,14 +347,36 @@ class PortfolioPage(QWidget):
 
     def refresh(self):
         with connect() as conn:
-            rows = conn.execute("SELECT * FROM assets ORDER BY name").fetchall()
+            manual = conn.execute("SELECT * FROM assets ORDER BY name").fetchall()
+            market = conn.execute("""
+                SELECT s.name, h.ticker, h.quantity, h.average_price_cents, s.price_cents
+                FROM holdings h JOIN stocks s ON s.ticker=h.ticker
+                WHERE h.quantity > 0 ORDER BY h.ticker
+            """).fetchall()
+
+        # Биржевые позиции являются основным источником для тикеров,
+        # уже купленных через рынок; не дублируем их ручными активами.
+        market_tickers = {row["ticker"].upper() for row in market}
+        rows = [
+            (row["name"], row["ticker"], row["quantity"], row["average_price_cents"],
+             row["current_price_cents"])
+            for row in manual
+            if not row["ticker"] or row["ticker"].upper() not in market_tickers
+        ]
+        rows.extend(
+            (row["name"], row["ticker"], row["quantity"], row["average_price_cents"], row["price_cents"])
+            for row in market
+        )
+
         self.table.setRowCount(len(rows))
         for r, row in enumerate(rows):
-            qty = row["quantity"]
-            current_value = int(qty * row["current_price_cents"])
-            cost_value = int(qty * row["average_price_cents"])
+            name, ticker, qty, avg_price, current_price = row
+            current_value = int(qty * current_price)
+            cost_value = int(qty * avg_price)
             pnl = current_value - cost_value
-            vals = [row["name"], row["ticker"], f"{qty:g}", money(row["average_price_cents"]), money(row["current_price_cents"]), ("+" if pnl > 0 else "") + money(pnl)]
+            pnl_pct = (pnl / cost_value * 100) if cost_value else 0.0
+            vals = [name, ticker, f"{qty:g}", money(avg_price), money(current_price),
+                    ("+" if pnl > 0 else "") + money(pnl), f"{pnl_pct:+.2f}%"]
             for c, value in enumerate(vals):
                 put(self.table, r, c, value)
 
@@ -575,8 +606,8 @@ class StockMarketPage(QWidget):
         layout.addWidget(trade_box)
 
         layout.addWidget(section("Мои акции"))
-        self.holdings_table = QTableWidget(0, 5)
-        self.holdings_table.setHorizontalHeaderLabels(["Тикер", "Компания", "Количество", "Средняя покупка", "Текущая стоимость"])
+        self.holdings_table = QTableWidget(0, 7)
+        self.holdings_table.setHorizontalHeaderLabels(["Тикер", "Компания", "Количество", "Средняя покупка", "Текущая стоимость", "Прибыль / убыток", "Прибыль / убыток, %"])
         configure_table(self.holdings_table)
         layout.addWidget(wrap(self.holdings_table), 2)
 
@@ -587,10 +618,7 @@ class StockMarketPage(QWidget):
         self.selected_ticker = None
 
     def cash_balance(self, conn):
-        tx_in = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type IN ('Income','Deposit')").fetchone()[0]
-        tx_out = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type IN ('Expense','Withdrawal')").fetchone()[0]
-        trades = conn.execute("SELECT COALESCE(SUM(CASE WHEN side='SELL' THEN total_cents ELSE -total_cents END),0) FROM trades").fetchone()[0]
-        return tx_in - tx_out + trades
+        return cash_balance(conn)
 
     def refresh(self):
         with connect() as conn:
@@ -611,7 +639,13 @@ class StockMarketPage(QWidget):
                 self.market.selectRow(r)
         self.holdings_table.setRowCount(len(holdings))
         for r, h in enumerate(holdings):
-            vals = [h["ticker"], h["name"], f"{h['quantity']:.2f}", money(h["average_price_cents"]), money(int(h["quantity"] * h["price_cents"]))]
+            current_value = int(h["quantity"] * h["price_cents"])
+            cost_value = int(h["quantity"] * h["average_price_cents"])
+            pnl = current_value - cost_value
+            pnl_pct = (pnl / cost_value * 100) if cost_value else 0.0
+            vals = [h["ticker"], h["name"], f"{h['quantity']:.2f}",
+                    money(h["average_price_cents"]), money(current_value),
+                    ("+" if pnl > 0 else "") + money(pnl), f"{pnl_pct:+.2f}%"]
             for c, value in enumerate(vals):
                 put(self.holdings_table, r, c, value)
         self.update_selected_price()
