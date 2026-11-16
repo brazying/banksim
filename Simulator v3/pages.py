@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushBut
 from PyQt6.QtCore import Qt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
-from database import connect, record_financial_snapshot, simulated_datetime
+from database import connect, record_financial_snapshot, simulated_datetime, cash_balance
 from finance import to_cents, money, compound_interest, projected_value, monte_carlo, monte_carlo_price_step, monte_carlo_capital
 from charts import CapitalChart, AllocationChart, style_axes
 from theme import *
@@ -111,25 +111,6 @@ def put(table, r, c, value, color=None, bold=False):
 def signed(row):
     plus = row["tx_type"] in ("Income", "Deposit")
     return ("+" if plus else "−") + money(row["amount_cents"])
-
-def cash_balance(conn):
-    """Единый денежный баланс: операции по счёту, акции, облигации, купоны и погашения."""
-    income = conn.execute(
-        "SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type IN ('Income','Deposit')"
-    ).fetchone()[0]
-    expense = conn.execute(
-        "SELECT COALESCE(SUM(amount_cents),0) FROM transactions WHERE tx_type IN ('Expense','Withdrawal')"
-    ).fetchone()[0]
-    trade_cash = conn.execute(
-        "SELECT COALESCE(SUM(CASE WHEN side='SELL' THEN total_cents ELSE -total_cents END),0) FROM trades"
-    ).fetchone()[0]
-    bond_trade_cash = conn.execute(
-        "SELECT COALESCE(SUM(CASE WHEN side='SELL' THEN total_cents ELSE -total_cents END),0) FROM bond_trades"
-    ).fetchone()[0]
-    coupons = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM bond_coupon_payments").fetchone()[0]
-    redemptions = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM bond_redemptions").fetchone()[0]
-    return income - expense + trade_cash + bond_trade_cash + coupons + redemptions
-
 
 def operation_rows(conn):
     rows = []
@@ -755,7 +736,6 @@ class SimulationPage(QWidget):
         self._projection_basis = None
 
     def refresh_live_values(self):
-        previous_total = self._cash_cents + self._portfolio_cents
         with connect() as conn:
             self._cash_cents = cash_balance(conn)
             manual = conn.execute("""
