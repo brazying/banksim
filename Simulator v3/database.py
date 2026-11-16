@@ -209,8 +209,9 @@ def init_db():
         conn.execute("INSERT OR IGNORE INTO market_clock(id,simulated_at) VALUES(1,?)", (market_now,))
         conn.execute("""
             INSERT OR IGNORE INTO stock_price_history(ticker,simulated_at,price_cents)
-            SELECT ticker, ?, price_cents FROM stocks
-        """, (market_now,))
+            SELECT ticker, (SELECT simulated_at FROM market_clock WHERE id=1), price_cents
+            FROM stocks
+        """)
 
         conn.execute("INSERT OR IGNORE INTO holdings(ticker, quantity, average_price_cents) SELECT ticker, 0, 0 FROM stocks")
         from datetime import date
