@@ -909,7 +909,13 @@ class ReportsPage(QWidget):
         return (today - timedelta(days=days - 1)).isoformat()
 
     def _portfolio_data(self, conn):
-        return portfolio_totals(conn)
+        source_positions, cost, value = portfolio_totals(conn)
+        # Остальная аналитика отчётов использует компактный формат из пяти полей.
+        positions = [
+            (name, quantity, average, current, kind)
+            for name, _ticker, quantity, average, current, kind in source_positions
+        ]
+        return positions, cost, value
 
     def _draw_flow(self, operations):
         monthly = {}
