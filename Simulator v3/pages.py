@@ -1,4 +1,13 @@
 from datetime import date, timedelta
+import calendar
+
+
+def add_months(value, months):
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(value.day, calendar.monthrange(year, month)[1])
+    return value.replace(year=year, month=month, day=day)
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTableWidget,
     QTableWidgetItem, QHeaderView, QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox, QFormLayout,
@@ -220,6 +229,11 @@ class DashboardPage(QWidget):
                        s.price_cents AS current_price_cents
                 FROM holdings h JOIN stocks s ON s.ticker = h.ticker
                 WHERE h.quantity > 0
+                UNION ALL
+                SELECT b.name || ' (' || b.ticker || ')' AS name,
+                       h.quantity AS quantity, b.price_cents AS current_price_cents
+                FROM bond_holdings h JOIN bonds b ON b.ticker=h.ticker
+                WHERE h.quantity > 0
             """).fetchall()
             all_operations = operation_rows(conn)
         portfolio = sum(int(row["quantity"] * row["current_price_cents"]) for row in assets)
@@ -388,6 +402,11 @@ class PortfolioPage(QWidget):
                 FROM holdings h JOIN stocks s ON s.ticker=h.ticker
                 WHERE h.quantity > 0 ORDER BY h.ticker
             """).fetchall()
+            bonds = conn.execute("""
+                SELECT b.name,b.ticker,h.quantity,h.average_price_cents,b.price_cents
+                FROM bond_holdings h JOIN bonds b ON b.ticker=h.ticker
+                WHERE h.quantity>0 ORDER BY b.ticker
+            """).fetchall()
 
         # Биржевые позиции являются основным источником для тикеров,
         # уже купленных через рынок; не дублируем их ручными активами.
@@ -401,6 +420,10 @@ class PortfolioPage(QWidget):
         rows.extend(
             (row["name"], row["ticker"], row["quantity"], row["average_price_cents"], row["price_cents"])
             for row in market
+        )
+        rows.extend(
+            (row["name"] + " · облигация", row["ticker"], row["quantity"], row["average_price_cents"], row["price_cents"])
+            for row in bonds
         )
 
         self.table.setRowCount(len(rows))
@@ -463,7 +486,6 @@ class BondsPage(QWidget):
     def process_coupon_payments(self, conn):
         today = date.today()
         due = conn.execute("SELECT * FROM bonds WHERE next_coupon_date<=? AND next_coupon_date<maturity_date", (today.isoformat(),)).fetchall()
-        from dateutil.relativedelta import relativedelta
         for bond in due:
             holding = conn.execute("SELECT quantity FROM bond_holdings WHERE ticker=?", (bond["ticker"],)).fetchone()
             quantity = float(holding["quantity"]) if holding else 0.0
@@ -471,7 +493,7 @@ class BondsPage(QWidget):
                 amount = int(round(quantity * bond["face_value_cents"] * bond["coupon_rate"] / 100 / 2))
                 conn.execute("INSERT INTO bond_coupon_payments(payment_date,ticker,quantity,amount_cents) VALUES(?,?,?,?)",
                              (bond["next_coupon_date"], bond["ticker"], quantity, amount))
-            next_date = date.fromisoformat(bond["next_coupon_date"]) + relativedelta(months=6)
+            next_date = add_months(date.fromisoformat(bond["next_coupon_date"]), 6)
             conn.execute("UPDATE bonds SET next_coupon_date=? WHERE ticker=?", (next_date.isoformat(), bond["ticker"]))
 
     def refresh(self):
@@ -686,7 +708,11 @@ class SimulationPage(QWidget):
                 FROM holdings h JOIN stocks s ON s.ticker=h.ticker
                 WHERE h.quantity>0
             """).fetchone()[0]
-            self._portfolio_cents = int(manual + market)
+            bonds = conn.execute("""
+                SELECT COALESCE(SUM(CAST(ROUND(h.quantity*b.price_cents) AS INTEGER)),0)
+                FROM bond_holdings h JOIN bonds b ON b.ticker=h.ticker WHERE h.quantity>0
+            """).fetchone()[0]
+            self._portfolio_cents = int(manual + market + bonds)
         total = self._cash_cents + self._portfolio_cents
         self.cash_value.value_label.setText(money(self._cash_cents))
         self.portfolio_value.value_label.setText(money(self._portfolio_cents))
