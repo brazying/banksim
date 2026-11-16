@@ -203,7 +203,7 @@ class DashboardPage(QWidget):
         layout.addLayout(row)
         charts_row = QHBoxLayout()
         charts_row.setSpacing(12)
-        capital_box = QGroupBox("История баланса")
+        capital_box = QGroupBox("История общего капитала")
         capital_layout = QVBoxLayout(capital_box)
         self.capital_chart = CapitalChart()
         capital_layout.addWidget(self.capital_chart)
@@ -224,6 +224,9 @@ class DashboardPage(QWidget):
         with connect() as conn:
             rows = operation_rows(conn)[:8]
             balance = cash_balance(conn)
+            snapshots = conn.execute(
+                "SELECT captured_at, net_worth_cents FROM financial_snapshots ORDER BY captured_at"
+            ).fetchall()
             assets = conn.execute("""
                 SELECT a.name AS name, a.quantity AS quantity,
                        a.current_price_cents AS current_price_cents
@@ -244,18 +247,16 @@ class DashboardPage(QWidget):
                 FROM bond_holdings h JOIN bonds b ON b.ticker=h.ticker
                 WHERE h.quantity > 0
             """).fetchall()
-            all_operations = operation_rows(conn)
-        portfolio = sum(int(row["quantity"] * row["current_price_cents"]) for row in assets)
+        portfolio = sum(int(round(row["quantity"] * row["current_price_cents"])) for row in assets)
         self.balance.value_label.setText(money(balance))
         self.portfolio.value_label.setText(money(portfolio))
         self.net.value_label.setText(money(balance + portfolio))
-        running = 0
-        by_date = {}
-        for operation in reversed(all_operations):
-            running += operation["delta"]
-            by_date[operation["date"]] = running
-        labels = list(by_date.keys())[-30:]
-        values = [by_date[key] / 100 for key in labels]
+        recent_snapshots = snapshots[-30:]
+        labels = [
+            datetime.fromisoformat(row["captured_at"]).strftime("%d.%m %H:%M")
+            for row in recent_snapshots
+        ]
+        values = [row["net_worth_cents"] / 100 for row in recent_snapshots]
         self.capital_chart.plot_capital(labels, values)
         self.allocation_chart.plot_allocation(
             [row["name"] for row in assets],
@@ -439,8 +440,8 @@ class PortfolioPage(QWidget):
         self.table.setRowCount(len(rows))
         for r, row in enumerate(rows):
             name, ticker, qty, avg_price, current_price = row
-            current_value = int(qty * current_price)
-            cost_value = int(qty * avg_price)
+            current_value = int(round(qty * current_price))
+            cost_value = int(round(qty * avg_price))
             pnl = current_value - cost_value
             pnl_pct = (pnl / cost_value * 100) if cost_value else 0.0
             vals = [name, ticker, f"{qty:g}", money(avg_price), money(current_price),
@@ -661,6 +662,10 @@ class DepositPage(QWidget):
         layout.addWidget(section("Прогноз баланса"))
         layout.addWidget(self.result)
         layout.addWidget(self.interest)
+        explanation = QLabel("Это расчётный сценарий: он не открывает вклад и не изменяет деньги на банковском счёте.")
+        explanation.setWordWrap(True)
+        explanation.setObjectName("Muted")
+        layout.addWidget(explanation)
         layout.addStretch()
 
     def calculate(self):
@@ -954,8 +959,8 @@ class ReportsPage(QWidget):
             (row["quantity"], row["average_price_cents"], row["price_cents"])
             for row in bonds
         )
-        cost = sum(int(qty * avg) for qty, avg, _ in positions)
-        value = sum(int(qty * current) for qty, _, current in positions)
+        cost = sum(int(round(qty * avg)) for qty, avg, _ in positions)
+        value = sum(int(round(qty * current)) for qty, _, current in positions)
         return cost, value
 
     def _draw_flow_chart(self, operations):
