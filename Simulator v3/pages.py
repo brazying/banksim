@@ -184,11 +184,22 @@ class DashboardPage(QWidget):
         with connect() as conn:
             rows = operation_rows(conn)[:8]
             balance = cash_balance(conn)
-            assets = conn.execute("SELECT name, quantity, current_price_cents FROM assets").fetchall()
-            market_assets = conn.execute("SELECT s.name || ' (' || s.ticker || ')', h.quantity, s.price_cents FROM holdings h JOIN stocks s ON s.ticker=h.ticker WHERE h.quantity > 0").fetchall()
-            assets = list(assets) + list(market_assets)
+            assets = conn.execute("""
+                SELECT a.name AS name, a.quantity AS quantity,
+                       a.current_price_cents AS current_price_cents
+                FROM assets a
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM holdings h
+                    WHERE h.ticker = UPPER(a.ticker) AND h.quantity > 0
+                )
+                UNION ALL
+                SELECT s.name || ' (' || s.ticker || ')' AS name,
+                       h.quantity AS quantity,
+                       s.price_cents AS current_price_cents
+                FROM holdings h JOIN stocks s ON s.ticker = h.ticker
+                WHERE h.quantity > 0
+            """).fetchall()
             all_operations = operation_rows(conn)
-        balance = balance
         portfolio = sum(int(row["quantity"] * row["current_price_cents"]) for row in assets)
         self.balance.value_label.setText(money(balance))
         self.portfolio.value_label.setText(money(portfolio))
