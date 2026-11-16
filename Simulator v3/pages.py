@@ -542,7 +542,7 @@ class BondsPage(QWidget):
         for r,h in enumerate(positions):
             semi=int(round(h["quantity"]*h["face_value_cents"]*h["coupon_rate"]/100/2))
             vals=[h["ticker"],h["name"],f"{h['quantity']:.0f}",money(h["average_price_cents"]),
-                  money(int(h["quantity"]*h["price_cents"])),money(semi),h["maturity_date"]]
+                  money(int(round(h["quantity"]*h["price_cents"]))),money(semi),h["maturity_date"]]
             for c,v in enumerate(vals): put(self.holdings,r,c,v)
         self.update_selected()
 
@@ -1227,7 +1227,7 @@ class StockMarketPage(QWidget):
             cash = self.cash_balance(conn)
             holdings = conn.execute("SELECT h.*, s.name, s.price_cents FROM holdings h JOIN stocks s ON s.ticker=h.ticker WHERE h.quantity > 0 ORDER BY h.ticker").fetchall()
         self.cash_label.setText(f"Доступно: {money(cash)}")
-        self.portfolio_label.setText(f"Стоимость акций: {money(sum(int(h['quantity'] * h['price_cents']) for h in holdings))}")
+        self.portfolio_label.setText(f"Стоимость акций: {money(sum(int(round(h['quantity'] * h['price_cents'])) for h in holdings))}")
         selected = self.selected_ticker
         self.market.setRowCount(len(stocks))
         for r, stock in enumerate(stocks):
@@ -1240,8 +1240,8 @@ class StockMarketPage(QWidget):
                 self.market.selectRow(r)
         self.holdings_table.setRowCount(len(holdings))
         for r, h in enumerate(holdings):
-            current_value = int(h["quantity"] * h["price_cents"])
-            cost_value = int(h["quantity"] * h["average_price_cents"])
+            current_value = int(round(h["quantity"] * h["price_cents"]))
+            cost_value = int(round(h["quantity"] * h["average_price_cents"]))
             pnl = current_value - cost_value
             pnl_pct = (pnl / cost_value * 100) if cost_value else 0.0
             vals = [h["ticker"], h["name"], f"{h['quantity']:.2f}",
