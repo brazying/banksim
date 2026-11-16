@@ -596,6 +596,8 @@ class BondsPage(QWidget):
                 simulated_today = simulated_datetime(conn).date().isoformat()
                 if not bond or bond["maturity_date"] <= simulated_today:
                     raise ValueError("Срок обращения этого выпуска завершён.")
+                # Начисляем наступившие купоны до изменения позиции.
+                self.process_coupon_payments(conn)
                 holding=conn.execute("SELECT * FROM bond_holdings WHERE ticker=?",(ticker,)).fetchone()
                 price=bond["price_cents"]
                 total=price*qty
