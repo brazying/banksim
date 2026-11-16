@@ -157,3 +157,75 @@ def monte_carlo_price_step(
         + daily_volatility * random_shock
     )
     return max(1, int(round(price_cents * math.exp(log_return))))
+
+
+def monte_carlo_capital(
+    cash_cents: int,
+    portfolio_cents: int,
+    annual_return_percent: float,
+    volatility_percent: float,
+    years: int,
+    simulations: int = 1000,
+    monthly_contribution_cents: int = 0,
+) -> dict[str, object]:
+    """Моделирует общий капитал: денежный остаток отдельно, инвестиции по GBM."""
+    import math
+    import random
+    from statistics import mean, median
+
+    if cash_cents < 0 or portfolio_cents < 0 or cash_cents + portfolio_cents <= 0:
+        raise ValueError("На счёте или в портфеле должен быть капитал.")
+    if not -99 <= annual_return_percent <= 100:
+        raise ValueError("Годовая доходность должна быть от -99 до 100%.")
+    if not 0 <= volatility_percent <= 100:
+        raise ValueError("Волатильность должна быть от 0 до 100%.")
+    if years < 1 or simulations < 100 or monthly_contribution_cents < 0:
+        raise ValueError("Проверьте срок, число сценариев и ежемесячное пополнение.")
+
+    mu = annual_return_percent / 100
+    sigma = volatility_percent / 100
+    monthly_sigma = sigma / math.sqrt(12)
+    monthly_drift = (mu - 0.5 * sigma * sigma) / 12
+    starting_total = cash_cents + portfolio_cents
+    year_values = [[] for _ in range(years + 1)]
+    sample_paths = []
+
+    for simulation in range(simulations):
+        invested = portfolio_cents / 100
+        cash = cash_cents / 100
+        path = [starting_total / 100]
+        for month in range(1, years * 12 + 1):
+            shock = random.gauss(0, 1)
+            invested *= math.exp(monthly_drift + monthly_sigma * shock)
+            invested += monthly_contribution_cents / 100
+            if month % 12 == 0:
+                total = cash + invested
+                year_values[month // 12].append(total)
+                path.append(total)
+        if simulation < min(100, simulations):
+            sample_paths.append(path)
+
+    median_by_year = []
+    p5_by_year = []
+    p95_by_year = []
+    for index, values in enumerate(year_values):
+        if index == 0:
+            values = [starting_total / 100] * simulations
+        ordered = sorted(values)
+        median_by_year.append(float(median(ordered)))
+        p5_by_year.append(float(ordered[int((len(ordered) - 1) * 0.05)]))
+        p95_by_year.append(float(ordered[int((len(ordered) - 1) * 0.95)]))
+
+    finals = year_values[-1]
+    return {
+        "average": int(round(mean(finals) * 100)),
+        "median": int(round(median(finals) * 100)),
+        "p5": int(round(p5_by_year[-1] * 100)),
+        "p95": int(round(p95_by_year[-1] * 100)),
+        "loss_probability": sum(v < starting_total / 100 for v in finals) / simulations * 100,
+        "years": list(range(years + 1)),
+        "median_path": median_by_year,
+        "p5_path": p5_by_year,
+        "p95_path": p95_by_year,
+        "sample_paths": sample_paths,
+    }
