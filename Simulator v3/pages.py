@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import calendar
 
 
@@ -1140,6 +1140,35 @@ class StockMarketPage(QWidget):
         market_layout.addWidget(self.market)
         layout.addWidget(market_box, 3)
 
+        history_box = QGroupBox("История цены выбранной акции")
+        history_layout = QVBoxLayout(history_box)
+        controls = QHBoxLayout()
+        controls.addWidget(QLabel("Период:"))
+        self.history_period = QComboBox()
+        self.history_period.addItem("Последние 10 дней", 10)
+        self.history_period.addItem("Последние 30 дней", 30)
+        self.history_period.addItem("Последние 90 дней", 90)
+        controls.addWidget(self.history_period)
+        controls.addSpacing(16)
+        controls.addWidget(QLabel("Детальность:"))
+        self.history_detail = QComboBox()
+        self.history_detail.addItem("10 изменений за период", "summary")
+        self.history_detail.addItem("Каждый час", "hourly")
+        controls.addWidget(self.history_detail)
+        controls.addStretch()
+        history_layout.addLayout(controls)
+        self.history_figure = Figure(figsize=(9, 3), dpi=90, facecolor=SURFACE)
+        self.history_canvas = FigureCanvas(self.history_figure)
+        self.history_axes = self.history_figure.add_subplot(111)
+        history_layout.addWidget(self.history_canvas)
+        self.price_history = QTableWidget(0, 5)
+        self.price_history.setHorizontalHeaderLabels(["Симулируемое время", "Цена", "Изменение", "Изменение, %", "Описание"])
+        configure_table(self.price_history)
+        history_layout.addWidget(wrap(self.price_history))
+        self.history_period.currentIndexChanged.connect(self.refresh_price_history)
+        self.history_detail.currentIndexChanged.connect(self.refresh_price_history)
+        layout.addWidget(history_box, 3)
+
         trade_box = QGroupBox("Совершить сделку")
         trade_form = QHBoxLayout(trade_box)
         self.selected_stock = QLabel("Выбери акцию в таблице выше")
@@ -1206,6 +1235,7 @@ class StockMarketPage(QWidget):
             for c, value in enumerate(vals):
                 put(self.holdings_table, r, c, value)
         self.update_selected_price()
+        self.refresh_price_history()
 
     def update_selected_price(self):
         row = self.market.currentRow()
@@ -1216,11 +1246,15 @@ class StockMarketPage(QWidget):
         if item:
             self.selected_ticker = item.text()
             self.selected_stock.setText(f"Выбрано: {self.selected_ticker}")
+            self.refresh_price_history()
 
     def move_market(self):
-        # Каждые 15 секунд симулятор проигрывает один условный торговый день.
-        # Для каждой акции генерируется независимый сценарий Монте-Карло (GBM).
+        # Один тик таймера равен одному часу симулируемого биржевого времени.
         with connect() as conn:
+            clock = conn.execute("SELECT simulated_at FROM market_clock WHERE id=1").fetchone()
+            market_time = datetime.fromisoformat(clock["simulated_at"]) + timedelta(hours=1)
+            stamp = market_time.isoformat(timespec="seconds")
+            conn.execute("UPDATE market_clock SET simulated_at=? WHERE id=1", (stamp,))
             rows = conn.execute("SELECT ticker, price_cents, volatility FROM stocks").fetchall()
             for stock in rows:
                 new_price = monte_carlo_price_step(
@@ -1233,8 +1267,68 @@ class StockMarketPage(QWidget):
                     "price_cents=?, updated_at=CURRENT_TIMESTAMP WHERE ticker=?",
                     (new_price, stock["ticker"]),
                 )
+                conn.execute(
+                    "INSERT OR IGNORE INTO stock_price_history(ticker,simulated_at,price_cents) VALUES(?,?,?)",
+                    (stock["ticker"], stamp, new_price),
+                )
             record_financial_snapshot(conn)
         self.refresh()
+
+    def refresh_price_history(self):
+        ticker = self.selected_ticker
+        self.history_axes.clear()
+        self.price_history.setRowCount(0)
+        if not ticker:
+            self.history_axes.text(0.5,0.5,"Выбери акцию, чтобы увидеть историю цены",
+                                   ha="center",va="center",transform=self.history_axes.transAxes,color=MUTED)
+            style_axes(self.history_axes)
+            self.history_canvas.draw_idle()
+            return
+        days = int(self.history_period.currentData() or 10)
+        with connect() as conn:
+            clock = conn.execute("SELECT simulated_at FROM market_clock WHERE id=1").fetchone()
+            now = datetime.fromisoformat(clock["simulated_at"]) if clock else datetime.now()
+            start = (now - timedelta(days=days)).isoformat(timespec="seconds")
+            rows = conn.execute(
+                """SELECT simulated_at,price_cents FROM stock_price_history
+                   WHERE ticker=? AND simulated_at>=? ORDER BY simulated_at""",
+                (ticker,start)
+            ).fetchall()
+        data = list(rows)
+        if not data:
+            self.history_axes.text(0.5,0.5,"История начнёт собираться после обновлений котировок",
+                                   ha="center",va="center",transform=self.history_axes.transAxes,color=MUTED)
+            style_axes(self.history_axes)
+            self.history_canvas.draw_idle()
+            return
+        if self.history_detail.currentData()=="summary" and len(data)>10:
+            indices = sorted({round(i*(len(data)-1)/9) for i in range(10)})
+            shown = [data[i] for i in indices]
+        else:
+            shown = data
+        times = [datetime.fromisoformat(row["simulated_at"]) for row in shown]
+        prices = [row["price_cents"]/100 for row in shown]
+        self.history_axes.plot(times,prices,linewidth=1.8,marker="o" if len(times)<=20 else None,
+                               markersize=3,color=ACCENT)
+        self.history_axes.set_ylabel("Цена, ₽",color=MUTED)
+        self.history_axes.tick_params(axis="x",labelrotation=30,labelcolor=MUTED)
+        self.history_axes.tick_params(axis="y",labelcolor=MUTED)
+        style_axes(self.history_axes)
+        self.history_figure.tight_layout()
+        self.history_canvas.draw_idle()
+        self.price_history.setRowCount(len(shown))
+        previous=None
+        for i,row in enumerate(shown):
+            price=int(row["price_cents"])
+            change=price-previous if previous is not None else 0
+            pct=(change/previous*100) if previous else 0
+            direction="Рост" if change>0 else ("Падение" if change<0 else "Без изменения")
+            vals=[datetime.fromisoformat(row["simulated_at"]).strftime("%d.%m.%Y %H:%M"),
+                  money(price),("+" if change>0 else "")+money(change),
+                  f"{pct:+.2f}%",direction]
+            for col,value in enumerate(vals):
+                put(self.price_history,i,col,value,(UP if change>0 else DOWN) if col in (2,3,4) else None)
+            previous=price
 
     def execute_trade(self, side):
         ticker = self.selected_ticker
