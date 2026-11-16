@@ -265,10 +265,19 @@ def init_db():
             )
             conn.execute("INSERT OR IGNORE INTO bond_holdings(ticker,quantity,average_price_cents) VALUES(?,0,0)",(ticker,))
 
-        has_any = conn.execute("SELECT EXISTS(SELECT 1 FROM transactions) OR EXISTS(SELECT 1 FROM trades)").fetchone()[0]
+        has_any = conn.execute("""
+            SELECT EXISTS(SELECT 1 FROM transactions)
+                OR EXISTS(SELECT 1 FROM trades)
+                OR EXISTS(SELECT 1 FROM bond_trades)
+                OR EXISTS(SELECT 1 FROM bond_coupon_payments)
+                OR EXISTS(SELECT 1 FROM bond_redemptions)
+        """).fetchone()[0]
         if not has_any:
-            conn.execute("INSERT INTO transactions(tx_date,tx_type,category,description,amount_cents) VALUES(?,?,?,?,?)",
-                         (date.today().isoformat(), "Income", "Стартовый капитал", "Начальный баланс для демонстрации торговли", 1_000_000))
+            seed_date = datetime.fromisoformat(market_now).isoformat(timespec="seconds")
+            conn.execute(
+                "INSERT INTO transactions(tx_date,tx_type,category,description,amount_cents) VALUES(?,?,?,?,?)",
+                (seed_date, "Income", "Стартовый капитал", "Начальный баланс для демонстрации торговли", 1_000_000)
+            )
         record_financial_snapshot(conn)
 
 
