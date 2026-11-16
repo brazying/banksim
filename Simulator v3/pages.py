@@ -686,7 +686,10 @@ class SimulationPage(QWidget):
         run.clicked.connect(self.run_projection)
         form.addRow("", run)
         layout.addWidget(box)
-        contribution_note = QLabel("Ежемесячное пополнение здесь существует только внутри прогноза и не выполняет реальное списание со счёта.")
+        contribution_note = QLabel(
+            "Ежемесячные взносы добавляются к инвестициям как дополнительные внешние средства. "
+            "Они не списываются с текущего банковского счёта, а его остаток в прогнозе остаётся неизменным."
+        )
         contribution_note.setWordWrap(True)
         contribution_note.setObjectName("Muted")
         layout.addWidget(contribution_note)
@@ -725,14 +728,15 @@ class SimulationPage(QWidget):
 
     def refresh(self):
         self.refresh_live_values()
-        self._projection_basis = None
-        self.output.setText("—")
-        self.details.setText("Текущие значения обновлены. Настрой параметры и рассчитай сценарии.")
-        self.axes.clear()
-        style_axes(self.axes)
-        self.axes.text(0.5, 0.5, "График появится после расчёта",
-                       color=MUTED, ha="center", va="center", transform=self.axes.transAxes)
-        self.canvas.draw_idle()
+        # Не стираем уже рассчитанный сценарий при обычном переходе между вкладками.
+        if self._projection_basis is None:
+            self.output.setText("—")
+            self.details.setText("Текущие значения обновлены. Настрой параметры и рассчитай сценарии.")
+            self.axes.clear()
+            style_axes(self.axes)
+            self.axes.text(0.5, 0.5, "График появится после расчёта",
+                           color=MUTED, ha="center", va="center", transform=self.axes.transAxes)
+            self.canvas.draw_idle()
 
     def run_projection(self):
         try:
