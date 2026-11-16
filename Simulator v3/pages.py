@@ -1,4 +1,3 @@
-import random
 from datetime import date
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTableWidget,
@@ -8,7 +7,7 @@ from PyQt6.QtCore import Qt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from database import connect
-from finance import to_cents, money, compound_interest, projected_value, monte_carlo
+from finance import to_cents, money, compound_interest, projected_value, monte_carlo, monte_carlo_price_step
 from charts import CapitalChart, AllocationChart, style_axes
 from theme import *
 from PyQt6.QtGui import QColor, QFont
@@ -601,7 +600,7 @@ class ReportsPage(QWidget):
 
 
 class StockMarketPage(QWidget):
-    """Локальный симулируемый рынок: котировки случайно меняются, сделки меняют денежный баланс."""
+    """Локальный рынок с Монте-Карло моделированием котировок."""
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
@@ -704,14 +703,21 @@ class StockMarketPage(QWidget):
             self.selected_stock.setText(f"Выбрано: {self.selected_ticker}")
 
     def move_market(self):
+        # Каждые 15 секунд симулятор проигрывает один условный торговый день.
+        # Для каждой акции генерируется независимый сценарий Монте-Карло (GBM).
         with connect() as conn:
             rows = conn.execute("SELECT ticker, price_cents, volatility FROM stocks").fetchall()
             for stock in rows:
-                # Малые случайные колебания с ограничением одного шага примерно в +/- 3%.
-                pct = max(-0.03, min(0.03, random.gauss(0, stock["volatility"])))
-                new_price = max(100, int(round(stock["price_cents"] * (1 + pct))))
-                conn.execute("UPDATE stocks SET previous_price_cents=price_cents, price_cents=?, updated_at=CURRENT_TIMESTAMP WHERE ticker=?",
-                             (new_price, stock["ticker"]))
+                new_price = monte_carlo_price_step(
+                    stock["price_cents"],
+                    stock["volatility"],
+                    annual_return_percent=8.0,
+                )
+                conn.execute(
+                    "UPDATE stocks SET previous_price_cents=price_cents, "
+                    "price_cents=?, updated_at=CURRENT_TIMESTAMP WHERE ticker=?",
+                    (new_price, stock["ticker"]),
+                )
         self.refresh()
 
     def execute_trade(self, side):
