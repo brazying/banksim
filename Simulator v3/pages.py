@@ -500,9 +500,10 @@ class BondsPage(QWidget):
             next_date = date.fromisoformat(bond["next_coupon_date"])
             maturity = date.fromisoformat(bond["maturity_date"])
             holding = conn.execute(
-                "SELECT quantity FROM bond_holdings WHERE ticker=?", (bond["ticker"],)
+                "SELECT quantity,average_price_cents FROM bond_holdings WHERE ticker=?", (bond["ticker"],)
             ).fetchone()
             quantity = float(holding["quantity"]) if holding else 0.0
+            average_price = int(holding["average_price_cents"]) if holding else 0
 
             # Если приложение долго не запускалось, начисляем все пропущенные купоны,
             # сохраняя исходные даты выплат и полугодовой интервал.
@@ -523,9 +524,12 @@ class BondsPage(QWidget):
 
             if maturity <= today and quantity > 0:
                 redemption = int(round(quantity * bond["face_value_cents"]))
+                realized_pnl = int(round(quantity * (bond["face_value_cents"] - average_price)))
                 conn.execute(
-                    "INSERT INTO bond_redemptions(payment_date,ticker,quantity,amount_cents) VALUES(?,?,?,?)",
-                    (bond["maturity_date"], bond["ticker"], quantity, redemption)
+                    """INSERT INTO bond_redemptions(
+                           payment_date,ticker,quantity,amount_cents,realized_pnl_cents
+                       ) VALUES(?,?,?,?,?)""",
+                    (bond["maturity_date"], bond["ticker"], quantity, redemption, realized_pnl)
                 )
                 conn.execute(
                     "UPDATE bond_holdings SET quantity=0,average_price_cents=0 WHERE ticker=?",
@@ -1073,9 +1077,10 @@ class ReportsPage(QWidget):
             ).fetchall()
             realized_query = (
                 "SELECT COALESCE((SELECT SUM(realized_pnl_cents) FROM trades WHERE (? IS NULL OR trade_date >= ?)),0) + "
-                "COALESCE((SELECT SUM(realized_pnl_cents) FROM bond_trades WHERE (? IS NULL OR trade_date >= ?)),0)"
+                "COALESCE((SELECT SUM(realized_pnl_cents) FROM bond_trades WHERE (? IS NULL OR trade_date >= ?)),0) + "
+                "COALESCE((SELECT SUM(realized_pnl_cents) FROM bond_redemptions WHERE (? IS NULL OR payment_date >= ?)),0)"
             )
-            realized_pnl = conn.execute(realized_query, (start, start, start, start)).fetchone()[0]
+            realized_pnl = conn.execute(realized_query, (start, start, start, start, start, start)).fetchone()[0]
 
         operations = [
             row for row in all_operations
