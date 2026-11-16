@@ -2,7 +2,7 @@ import sys
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel, QStackedWidget, QFrame
 from PyQt6.QtCore import Qt
 from database import init_db
-from pages import DashboardPage, AccountPage, PortfolioPage, DepositPage, SimulationPage, ReportsPage, StockMarketPage
+from pages import DashboardPage, AccountPage, PortfolioPage, DepositPage, SimulationPage, ReportsPage, StockMarketPage, BondsPage
 from theme import STYLE
 
 class MainWindow(QMainWindow):
@@ -33,6 +33,7 @@ class MainWindow(QMainWindow):
             ("Обзор", DashboardPage()),
             ("Банковский счёт", AccountPage()),
             ("Биржа", StockMarketPage()),
+            ("Облигации", BondsPage()),
             ("Портфель", PortfolioPage()),
             ("Вклады", DepositPage()),
             ("Моделирование", SimulationPage()),
