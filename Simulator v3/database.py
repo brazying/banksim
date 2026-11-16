@@ -116,7 +116,8 @@ def init_db():
             side TEXT NOT NULL CHECK(side IN ('BUY','SELL')),
             quantity REAL NOT NULL CHECK(quantity > 0),
             price_cents INTEGER NOT NULL CHECK(price_cents > 0),
-            total_cents INTEGER NOT NULL CHECK(total_cents > 0)
+            total_cents INTEGER NOT NULL CHECK(total_cents > 0),
+            realized_pnl_cents INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS bond_coupon_payments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -130,7 +131,8 @@ def init_db():
             payment_date TEXT NOT NULL,
             ticker TEXT NOT NULL REFERENCES bonds(ticker),
             quantity REAL NOT NULL,
-            amount_cents INTEGER NOT NULL
+            amount_cents INTEGER NOT NULL,
+            realized_pnl_cents INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS financial_snapshots (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
