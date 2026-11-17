@@ -41,6 +41,11 @@ def heading(text, subtitle=""):
     title = QLabel(text)
     title.setObjectName("PageTitle")
     box.addWidget(title)
+    if subtitle:
+        subtitle_label = QLabel(subtitle)
+        subtitle_label.setObjectName("PageSub")
+        subtitle_label.setWordWrap(True)
+        box.addWidget(subtitle_label)
     return box
 
 def section(text):
