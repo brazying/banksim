@@ -16,20 +16,25 @@ def _decimal_value(value, field_name: str) -> Decimal:
 def to_cents(value: int | float | str) -> int:
     amount = _decimal_value(value, "сумма")
     try:
+        precision = max(50, len(amount.as_tuple().digits) + max(amount.adjusted(), 0) + 5)
         with localcontext() as context:
-            context.prec = 50
+            context.prec = precision
             amount = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-    except InvalidOperation:
+            cents = int(amount * Decimal(100))
+    except (InvalidOperation, OverflowError):
         raise ValueError("Сумма слишком велика для обработки.") from None
-
-    cents = int(amount * 100)
     if cents <= 0:
         raise ValueError("Сумма должна быть больше нуля.")
     return cents
 
 
 def money(cents: int) -> str:
-    return f"{cents / 100:,.2f}".replace(",", " ") + " ₽"
+    """Форматировать копейки без преобразования в float и потери точности."""
+    value = int(cents)
+    sign = "-" if value < 0 else ""
+    rubles, kopecks = divmod(abs(value), 100)
+    formatted_rubles = f"{rubles:,}".replace(",", " ")
+    return f"{sign}{formatted_rubles}.{kopecks:02d} ₽"
 
 
 def _rounded_decimal_cents(value: Decimal) -> int:
@@ -37,7 +42,10 @@ def _rounded_decimal_cents(value: Decimal) -> int:
         with localcontext() as context:
             # Запас точности позволяет квантовать очень большие суммы,
             # не упираясь в стандартный 28-значный контекст Decimal.
-            context.prec = max(60, len(value.as_tuple().digits) + 10)
+            context.prec = max(
+                60,
+                len(value.as_tuple().digits) + max(value.adjusted(), 0) + 10,
+            )
             return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
     except (InvalidOperation, OverflowError):
         raise ValueError("Результат слишком велик для расчёта.") from None
