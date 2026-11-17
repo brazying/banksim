@@ -1,21 +1,46 @@
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP, localcontext
+import math
+
+
+def _decimal_value(value, field_name: str) -> Decimal:
+    """Преобразовать вход в конечное Decimal с понятной ошибкой."""
+    try:
+        result = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValueError(f"Некорректное значение: {field_name}.") from None
+    if not result.is_finite():
+        raise ValueError(f"Значение «{field_name}» должно быть конечным числом.")
+    return result
 
 
 def to_cents(value: int | float | str) -> int:
-    amount = Decimal(str(value)).quantize(
-        Decimal("0.01"),
-        rounding=ROUND_HALF_UP,
-    )
-    cents = int(amount * 100)
+    amount = _decimal_value(value, "сумма")
+    try:
+        with localcontext() as context:
+            context.prec = 50
+            amount = amount.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except InvalidOperation:
+        raise ValueError("Сумма слишком велика для обработки.") from None
 
+    cents = int(amount * 100)
     if cents <= 0:
         raise ValueError("Сумма должна быть больше нуля.")
-
     return cents
 
 
 def money(cents: int) -> str:
     return f"{cents / 100:,.2f}".replace(",", " ") + " ₽"
+
+
+def _rounded_decimal_cents(value: Decimal) -> int:
+    try:
+        with localcontext() as context:
+            # Запас точности позволяет квантовать очень большие суммы,
+            # не упираясь в стандартный 28-значный контекст Decimal.
+            context.prec = max(60, len(value.as_tuple().digits) + 10)
+            return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    except (InvalidOperation, OverflowError):
+        raise ValueError("Результат слишком велик для расчёта.") from None
 
 
 def compound_interest(
@@ -24,24 +49,26 @@ def compound_interest(
     years: int,
     compounds_per_year: int,
 ) -> int:
-    if principal_cents <= 0:
-        raise ValueError("Начальная сумма должна быть больше нуля.")
+    principal = _decimal_value(principal_cents, "начальная сумма")
+    rate_percent = _decimal_value(annual_rate_percent, "годовая ставка")
+    term = _decimal_value(years, "срок")
+    compounds = _decimal_value(compounds_per_year, "периодичность капитализации")
 
-    if annual_rate_percent < 0 or years < 0 or compounds_per_year < 1:
+    if principal <= 0:
+        raise ValueError("Начальная сумма должна быть больше нуля.")
+    if rate_percent < 0 or term < 0 or compounds < 1:
         raise ValueError("Проверьте ставку, срок и периодичность капитализации.")
 
-    principal = principal_cents / 100
-    rate = annual_rate_percent / 100
-    result = principal * (1 + rate / compounds_per_year) ** (
-        compounds_per_year * years
-    )
-
-    return int(
-        Decimal(str(result * 100)).quantize(
-            Decimal("1"),
-            rounding=ROUND_HALF_UP,
-        )
-    )
+    with localcontext() as context:
+        context.prec = 80
+        rate = rate_percent / Decimal(100)
+        periods = compounds * term
+        base = Decimal(1) + rate / compounds
+        try:
+            result_cents = principal * (base ** periods)
+        except (InvalidOperation, OverflowError):
+            raise ValueError("Результат слишком велик для расчёта.") from None
+    return _rounded_decimal_cents(result_cents)
 
 
 def projected_value(
@@ -49,21 +76,28 @@ def projected_value(
     annual_rate_percent: float,
     years: int,
 ) -> int:
-    if initial_cents < 0 or years < 0:
+    initial = _decimal_value(initial_cents, "начальная сумма")
+    rate_percent = _decimal_value(annual_rate_percent, "годовая ставка")
+    term = _decimal_value(years, "срок")
+
+    if initial < 0 or term < 0:
         raise ValueError("Сумма и срок не могут быть отрицательными.")
+    if rate_percent < -100:
+        raise ValueError("Годовая ставка не может быть ниже -100%.")
 
-    result = (
-        (initial_cents / 100)
-        * (1 + annual_rate_percent / 100) ** years
-        * 100
-    )
-
-    return int(
-        Decimal(str(result)).quantize(
-            Decimal("1"),
-            rounding=ROUND_HALF_UP,
-        )
-    )
+    with localcontext() as context:
+        context.prec = 80
+        base = Decimal(1) + rate_percent / Decimal(100)
+        if term == 0:
+            result_cents = initial
+        elif base == 0:
+            result_cents = Decimal(0)
+        else:
+            try:
+                result_cents = initial * (base ** term)
+            except (InvalidOperation, OverflowError):
+                raise ValueError("Результат слишком велик для расчёта.") from None
+    return _rounded_decimal_cents(result_cents)
 
 
 def monte_carlo(
