@@ -71,16 +71,18 @@ class FinancialLogicTests(unittest.TestCase):
         )
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class FinanceInputTests(unittest.TestCase):
     def test_compound_interest_handles_large_supported_values(self):
         from finance import compound_interest
 
         result = compound_interest(100_000_000, 100, 50, 1)
         self.assertEqual(result, 100_000_000 * (2 ** 50))
+
+    def test_compound_interest_handles_maximum_calculator_values(self):
+        from finance import compound_interest
+
+        result = compound_interest(100_000_000_000, 100, 100, 365)
+        self.assertGreater(result, 100_000_000_000)
 
     def test_projected_value_rejects_rate_below_minus_100_percent(self):
         from finance import projected_value
