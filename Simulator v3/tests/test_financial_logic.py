@@ -104,6 +104,12 @@ class FinanceInputTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     to_cents(value)
 
+    def test_compound_interest_handles_daily_compounding_at_large_values(self):
+        from finance import compound_interest
+
+        result = compound_interest(100_000_000, 100, 50, 365)
+        self.assertGreater(result, 10 ** 28)
+
 
 if __name__ == "__main__":
     unittest.main()
