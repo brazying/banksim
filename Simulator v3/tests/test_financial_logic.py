@@ -73,3 +73,35 @@ class FinancialLogicTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FinanceInputTests(unittest.TestCase):
+    def test_compound_interest_handles_large_supported_values(self):
+        from finance import compound_interest
+
+        result = compound_interest(100_000_000, 100, 50, 1)
+        self.assertEqual(result, 100_000_000 * (2 ** 50))
+
+    def test_projected_value_rejects_rate_below_minus_100_percent(self):
+        from finance import projected_value
+
+        with self.assertRaisesRegex(ValueError, "-100"):
+            projected_value(1_000_000, -150, 1)
+
+    def test_projected_value_allows_minus_100_percent(self):
+        from finance import projected_value
+
+        self.assertEqual(projected_value(1_000_000, -100, 1), 0)
+        self.assertEqual(projected_value(1_000_000, -100, 0), 1_000_000)
+
+    def test_to_cents_reports_invalid_input_as_value_error(self):
+        from finance import to_cents
+
+        for value in ("abc", "NaN", "Infinity"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    to_cents(value)
+
+
+if __name__ == "__main__":
+    unittest.main()
