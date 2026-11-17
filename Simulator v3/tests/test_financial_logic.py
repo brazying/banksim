@@ -111,5 +111,28 @@ class FinanceInputTests(unittest.TestCase):
         self.assertGreater(result, 10 ** 28)
 
 
+class MoneyFormattingTests(unittest.TestCase):
+    def test_money_preserves_large_amount_precision(self):
+        from finance import money
+
+        self.assertEqual(
+            money(12345678901234567890123456),
+            "123 456 789 012 345 678 901 234.56 ₽",
+        )
+
+    def test_money_formats_negative_values(self):
+        from finance import money
+
+        self.assertEqual(money(-12345), "-123.45 ₽")
+
+    def test_to_cents_preserves_large_decimal_input(self):
+        from finance import to_cents
+
+        self.assertEqual(
+            to_cents("123456789012345678901234567890.12"),
+            12345678901234567890123456789012,
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
