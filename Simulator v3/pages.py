@@ -402,7 +402,9 @@ class PortfolioPage(QWidget):
                 put(self.table, r, c, value)
 
 class BondsPage(QWidget):
-    """Учебный рынок облигаций с плавающей рыночной ценой и полугодовыми купонами."""    def __init__(self):
+    """Учебный рынок облигаций с плавающей рыночной ценой и полугодовыми купонами."""
+
+    def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
         layout.addLayout(heading("Рынок облигаций", "Фиксированный купон · выплаты каждые шесть месяцев · цена меняется на рынке"))
@@ -801,7 +803,9 @@ class SimulationPage(QWidget):
 
 
 class ReportsPage(QWidget):
-    """Сводная аналитика денежных потоков, портфеля и инвестиционного результата."""    def __init__(self):
+    """Сводная аналитика денежных потоков, портфеля и инвестиционного результата."""
+
+    def __init__(self):
         super().__init__()
         outer = QVBoxLayout(self)
         outer.addLayout(heading("Отчёты", "Денежные потоки, инвестиционный результат и динамика капитала"))
@@ -1212,7 +1216,8 @@ class StockMarketPage(QWidget):
         buy.clicked.connect(lambda: self.execute_trade("BUY"))
         sell.clicked.connect(lambda: self.execute_trade("SELL"))
         trade_form.addWidget(self.selected_stock_trade, 2)
-        trade_form.addWidget(QLabel("Количество:"))        trade_form.addWidget(self.quantity)
+        trade_form.addWidget(QLabel("Количество:"))
+        trade_form.addWidget(self.quantity)
         trade_form.addWidget(buy)
         trade_form.addWidget(sell)
         layout.addWidget(trade_box)
