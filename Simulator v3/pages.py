@@ -467,11 +467,11 @@ class PortfolioPage(QWidget):
         form.addRow("Название", self.name)
         form.addRow("Тикер", self.ticker)
         form.addRow("Количество", self.quantity)
-        form.addRow("Средняя цена покупки", self.avg_price)
+        form.addRow("Цена при добавлении (за единицу)", self.avg_price)
         form.addRow("Текущая цена", self.price)
         form.addRow("", add)
         layout.addWidget(box)
-        asset_note = QLabel("Добавление или увеличение позиции списывает её себестоимость со счёта. Уменьшение позиции возвращает соответствующую часть себестоимости.")
+        asset_note = QLabel("Цена при добавлении используется как точка отсчёта: в таблице показывается, насколько изменилась стоимость актива в рублях и процентах. Покупка списывает вложенную сумму со счёта.")
         asset_note.setWordWrap(True)
         asset_note.setObjectName("Muted")
         layout.addWidget(asset_note)
@@ -479,7 +479,7 @@ class PortfolioPage(QWidget):
         self.search = table_search("Поиск по названию или тикеру")
         layout.addWidget(self.search)
         self.table = QTableWidget(0, 7)
-        self.table.setHorizontalHeaderLabels(["Название", "Тикер", "Кол-во", "Ср. покупка", "Текущая", "Прибыль / убыток", "Прибыль / убыток, %"])
+        self.table.setHorizontalHeaderLabels(["Название", "Тикер", "Кол-во", "Текущая стоимость", "Изменение", "Изменение, %"])
         configure_table(self.table)
         connect_table_search(self.search, self.table)
         layout.addWidget(wrap(self.table))
@@ -549,7 +549,7 @@ class PortfolioPage(QWidget):
             cost_value = int(round(qty * avg_price))
             pnl = current_value - cost_value
             pnl_pct = (pnl / cost_value * 100) if cost_value else 0.0
-            vals = [name, ticker, f"{qty:g}", money(avg_price), money(current_price),
+            vals = [name, ticker, f"{qty:g}", money(current_value),
                     ("+" if pnl > 0 else "") + money(pnl), f"{pnl_pct:+.2f}%"]
             for c, value in enumerate(vals):
                 put(self.table, r, c, value)
@@ -1416,6 +1416,7 @@ class StockMarketPage(QWidget):
         configure_table(self.holdings_table)
         connect_table_search(self.holdings_search, self.holdings_table)
         self.holdings_table.itemSelectionChanged.connect(self.update_selected_holding)
+        self.holdings_table.itemDoubleClicked.connect(self.show_holding_price_history)
         layout.addWidget(wrap(self.holdings_table), 2)
 
         sell_box = QGroupBox("Продажа — только из «Мои акции»")
@@ -1437,6 +1438,7 @@ class StockMarketPage(QWidget):
         layout.addWidget(sell_box)
 
         self.selected_ticker = None
+        self.history_ticker = None
         self.selected_sell_ticker = None
 
     def cash_balance(self, conn):
@@ -1477,6 +1479,20 @@ class StockMarketPage(QWidget):
         if not self.history_box.isHidden():
             self.refresh_price_history()
 
+    def show_holding_price_history(self, item):
+        """Открыть историю котировок по двойному щелчку в таблице портфеля."""
+        row = item.row()
+        ticker_item = self.holdings_table.item(row, 0)
+        if not ticker_item:
+            return
+        self.history_ticker = ticker_item.text()
+        self.selected_stock.setText(f"История позиции: {self.history_ticker}")
+        self.history_toggle.setEnabled(True)
+        self.history_box.setVisible(True)
+        self.history_toggle.setText("Скрыть историю")
+        self.refresh_price_history()
+        self.history_box.setFocus()
+
     def update_selected_holding(self):
         row = self.holdings_table.currentRow()
         if row < 0:
@@ -1502,6 +1518,7 @@ class StockMarketPage(QWidget):
         item = self.market.item(row, 0)
         if item:
             self.selected_ticker = item.text()
+            self.history_ticker = self.selected_ticker
             self.selected_stock.setText(f"Выбрана акция: {self.selected_ticker}")
             self.selected_stock_trade.setText(f"Выбрано: {self.selected_ticker}")
             self.history_toggle.setEnabled(True)
@@ -1542,7 +1559,7 @@ class StockMarketPage(QWidget):
         self.refresh()
 
     def refresh_price_history(self):
-        ticker = self.selected_ticker
+        ticker = self.history_ticker or self.selected_ticker
         self.history_axes.clear()
         self.price_history.setRowCount(0)
         if not ticker:
