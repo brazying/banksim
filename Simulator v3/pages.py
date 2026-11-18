@@ -17,6 +17,9 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from database import connect, record_financial_snapshot, simulated_datetime, cash_balance, portfolio_totals
 from finance import to_cents, money, compound_interest, projected_value, monte_carlo, monte_carlo_price_step, monte_carlo_capital
+
+# Максимальное значение, которое SQLite может хранить в столбце INTEGER.
+SQLITE_MAX_INT = 2**63 - 1
 from charts import CapitalChart, AllocationChart, style_axes
 from theme import *
 from PyQt6.QtGui import QColor, QFont
@@ -689,6 +692,12 @@ class DepositPage(QWidget):
             result = compound_interest(principal, self.rate.value(), self.years.value(), self.compounds.currentData())
             self.result.setText(money(result))
             self.interest.setText(f"Начисленные проценты: {money(result - principal)}")
+            if result > SQLITE_MAX_INT:
+                self.interest.setText(
+                    self.interest.text()
+                    + "\nСценарий не сохранён: результат слишком велик для хранения в базе данных."
+                )
+                return
             with connect() as conn:
                 conn.execute("INSERT INTO deposit_scenarios(principal_cents,annual_rate,years,compounds_per_year,result_cents) VALUES(?,?,?,?,?)",
                     (principal, self.rate.value(), self.years.value(), self.compounds.currentData(), result))
@@ -813,7 +822,7 @@ class SimulationPage(QWidget):
             self.details.setText(
                 f"Среднее: {money(result['average'])} · "
                 f"Нижний сценарий (5%): {money(result['p5'])} · "
-                f"Верхний сценарий (95%): {money(result['p95'])}\\n"
+                f"Верхний сценарий (95%): {money(result['p95'])}\n"
                 f"Вероятность оказаться ниже текущего капитала: {result['loss_probability']:.1f}%. "
                 f"В расчёте участвуют фактический баланс и текущая стоимость портфеля."
             )
@@ -838,11 +847,18 @@ class SimulationPage(QWidget):
             self.figure.subplots_adjust(left=0.12, right=0.98, top=0.94, bottom=0.25)
             self.canvas.draw_idle()
 
+            initial_cents = self._cash_cents + self._portfolio_cents
+            final_cents = int(result["average"])
+            if max(initial_cents, final_cents) > SQLITE_MAX_INT:
+                self.details.setText(
+                    self.details.text()
+                    + "\nРасчёт не сохранён в историю: значения слишком велики для базы данных."
+                )
+                return
             with connect() as conn:
                 conn.execute(
                     "INSERT INTO simulation_runs(initial_cents,annual_rate,years,final_cents) VALUES(?,?,?,?)",
-                    (self._cash_cents + self._portfolio_cents, self.rate.value(),
-                     self.years.value(), result["average"])
+                    (initial_cents, self.rate.value(), self.years.value(), final_cents)
                 )
         except Exception as exc:
             QMessageBox.warning(self, "Ошибка моделирования", str(exc))
