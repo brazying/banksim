@@ -2,6 +2,7 @@
 
 Запускаются без экрана (Qt offscreen) на временной базе данных.
 """
+import gc
 import os
 import tempfile
 import unittest
@@ -17,7 +18,7 @@ _app = QApplication.instance() or QApplication([])
 
 class AppFlowTests(unittest.TestCase):
     def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
+        self._tmp = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
         self._old_path = database.DB_PATH
         database.DB_PATH = Path(self._tmp.name) / "test.sqlite3"
         database.init_db()
@@ -38,8 +39,12 @@ class AppFlowTests(unittest.TestCase):
     def tearDown(self):
         for name, fn in self._old_dialogs.items():
             setattr(QMessageBox, name, fn)
-        database.DB_PATH = self._old_path
+        self.window.market_timer.stop()
         self.window.close()
+        self.window.deleteLater()
+        _app.processEvents()
+        database.DB_PATH = self._old_path
+        gc.collect()
         self._tmp.cleanup()
 
     # --- вспомогательные функции
