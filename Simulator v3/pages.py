@@ -110,6 +110,7 @@ def connect_table_search(field, table):
                 for col in range(table.columnCount())
             )
             table.setRowHidden(row, not matches)
+    field.apply_filter = apply_filter
     field.textChanged.connect(apply_filter)
 
 
@@ -349,6 +350,7 @@ class AccountPage(QWidget):
             vals = [row["date"], row["type"], row["category"], row["description"], row["amount"]]
             for c, value in enumerate(vals):
                 put(self.table, r, c, value)
+        self.search.apply_filter(self.search.text())
 
 class PortfolioPage(QWidget):
     def __init__(self):
@@ -439,6 +441,7 @@ class PortfolioPage(QWidget):
                     ("+" if pnl > 0 else "") + money(pnl), f"{pnl_pct:+.2f}%"]
             for c, value in enumerate(vals):
                 put(self.table, r, c, value)
+        self.search.apply_filter(self.search.text())
 
 class BondsPage(QWidget):
     """Учебный рынок облигаций с плавающей рыночной ценой и полугодовыми купонами."""
@@ -571,6 +574,7 @@ class BondsPage(QWidget):
                   money(int(round(h["quantity"]*h["price_cents"]))),money(semi),h["maturity_date"]]
             for c,v in enumerate(vals): put(self.holdings,r,c,v)
         self.update_selected()
+        self.market_search.apply_filter(self.market_search.text())
 
     def update_selected(self):
         row=self.market.currentRow()
@@ -1168,6 +1172,7 @@ class ReportsPage(QWidget):
             for c, value in enumerate((row["date"], row["type"], row["category"],
                                        row["description"], row["amount"])):
                 put(self.history, r, c, value)
+        self.history_search.apply_filter(self.history_search.text())
 
         filtered_snapshots = [row for row in snapshots
                               if start is None or row["captured_at"][:10] >= start]
@@ -1313,6 +1318,8 @@ class StockMarketPage(QWidget):
             for c, value in enumerate(vals):
                 put(self.holdings_table, r, c, value)
         self.update_selected_price()
+        self.market_search.apply_filter(self.market_search.text())
+        self.holdings_search.apply_filter(self.holdings_search.text())
         if not self.history_box.isHidden():
             self.refresh_price_history()
 
