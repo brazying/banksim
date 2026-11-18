@@ -56,6 +56,57 @@ def section(text):
     label.setObjectName("Section")
     return label
 
+
+def format_operation_date(value):
+    """Convert database ISO date/time into a compact Russian display format."""
+    raw = str(value).strip()
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return raw
+    if len(raw) > 10:
+        return parsed.strftime("%d.%m.%Y · %H:%M")
+    return parsed.strftime("%d.%m.%Y")
+
+
+def capital_chart_data(snapshots, granularity):
+    """Return the last capital snapshot for each selected time bucket."""
+    records = [
+        (datetime.fromisoformat(row["captured_at"]), row["net_worth_cents"] / 100)
+        for row in snapshots
+    ]
+    if not records:
+        return [], []
+
+    if granularity == "hour":
+        records = records[-48:]
+        labels = [stamp.strftime("%d.%m %H:%M") for stamp, _ in records]
+        return labels, [value for _, value in records]
+
+    grouped = {}
+    for stamp, value in records:
+        if granularity == "day":
+            key = stamp.date()
+        elif granularity == "week":
+            key = stamp.date() - timedelta(days=stamp.weekday())
+        else:
+            key = (stamp.year, stamp.month)
+        grouped[key] = (stamp, value)
+
+    limits = {"day": 30, "week": 26, "month": 24}
+    periods = list(grouped.items())[-limits.get(granularity, 30):]
+    if granularity == "day":
+        labels = [stamp.strftime("%d.%m") for _, (stamp, _) in periods]
+    elif granularity == "week":
+        labels = [
+            (stamp.date() - timedelta(days=stamp.weekday())).strftime("%d.%m")
+            for _, (stamp, _) in periods
+        ]
+    else:
+        labels = [f"{key[1]:02d}.{key[0]}" for key, _ in periods]
+    return labels, [value for _, (_, value) in periods]
+
+
 def metric(title, value, hero=False):
     box = QFrame()
     box.setObjectName("Hero" if hero else "Metric")
@@ -218,7 +269,19 @@ class DashboardPage(QWidget):
         charts_row.setSpacing(12)
         capital_box = QGroupBox("История общего капитала")
         capital_layout = QVBoxLayout(capital_box)
+        scale_row = QHBoxLayout()
+        scale_row.addStretch()
+        scale_row.addWidget(QLabel("Масштаб:"))
+        self.capital_granularity = QComboBox()
+        self.capital_granularity.addItem("По часам", "hour")
+        self.capital_granularity.addItem("По дням", "day")
+        self.capital_granularity.addItem("По неделям", "week")
+        self.capital_granularity.addItem("По месяцам", "month")
+        scale_row.addWidget(self.capital_granularity)
+        capital_layout.addLayout(scale_row)
         self.capital_chart = CapitalChart()
+        self._capital_snapshots = []
+        self.capital_granularity.currentIndexChanged.connect(self.update_capital_chart)
         capital_layout.addWidget(self.capital_chart)
         allocation_box = QGroupBox("Структура активов")
         allocation_layout = QVBoxLayout(allocation_box)
@@ -238,6 +301,13 @@ class DashboardPage(QWidget):
         self.table.setMinimumHeight(150)
         layout.addWidget(wrap(self.table), 1)
 
+    def update_capital_chart(self):
+        labels, values = capital_chart_data(
+            self._capital_snapshots,
+            self.capital_granularity.currentData() or "hour"
+        )
+        self.capital_chart.plot_capital(labels, values)
+
     def refresh(self):
         with connect() as conn:
             rows = operation_rows(conn)[:8]
@@ -254,20 +324,15 @@ class DashboardPage(QWidget):
         self.balance.value_label.setText(money(balance))
         self.portfolio.value_label.setText(money(portfolio))
         self.net.value_label.setText(money(balance + portfolio))
-        recent_snapshots = snapshots[-30:]
-        labels = [
-            datetime.fromisoformat(row["captured_at"]).strftime("%d.%m %H:%M")
-            for row in recent_snapshots
-        ]
-        values = [row["net_worth_cents"] / 100 for row in recent_snapshots]
-        self.capital_chart.plot_capital(labels, values)
+        self._capital_snapshots = list(snapshots)
+        self.update_capital_chart()
         self.allocation_chart.plot_allocation(
             [row["name"] for row in assets],
             [row["quantity"] * row["current_price_cents"] / 100 for row in assets]
         )
         self.table.setRowCount(len(rows))
         for r, row in enumerate(rows):
-            vals = [row["date"], row["type"], row["category"], row["description"], row["amount"]]
+            vals = [format_operation_date(row["date"]), row["type"], row["category"], row["description"], row["amount"]]
             for c, value in enumerate(vals):
                 put(self.table, r, c, value)
 
@@ -350,7 +415,7 @@ class AccountPage(QWidget):
         self.balance_label.setText(f"Текущий баланс: {money(balance)}")
         self.table.setRowCount(len(rows))
         for r, row in enumerate(rows):
-            vals = [row["date"], row["type"], row["category"], row["description"], row["amount"]]
+            vals = [format_operation_date(row["date"]), row["type"], row["category"], row["description"], row["amount"]]
             for c, value in enumerate(vals):
                 put(self.table, r, c, value)
         self.search.apply_filter(self.search.text())
@@ -1185,7 +1250,7 @@ class ReportsPage(QWidget):
 
         self.history.setRowCount(len(operations))
         for r, row in enumerate(operations):
-            for c, value in enumerate((row["date"], row["type"], row["category"],
+            for c, value in enumerate((format_operation_date(row["date"]), row["type"], row["category"],
                                        row["description"], row["amount"])):
                 put(self.history, r, c, value)
         self.history_search.apply_filter(self.history_search.text())
