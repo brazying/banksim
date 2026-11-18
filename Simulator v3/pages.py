@@ -197,14 +197,19 @@ class DashboardPage(QWidget):
         allocation_layout = QVBoxLayout(allocation_box)
         self.allocation_chart = AllocationChart()
         allocation_layout.addWidget(self.allocation_chart)
+        self.capital_chart.setMinimumHeight(250)
+        self.allocation_chart.setMinimumHeight(250)
+        capital_box.setMinimumHeight(290)
+        allocation_box.setMinimumHeight(290)
         charts_row.addWidget(capital_box, 2)
         charts_row.addWidget(allocation_box, 1)
-        layout.addLayout(charts_row, 2)
+        layout.addLayout(charts_row, 3)
         layout.addWidget(section("Последние операции"))
         self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(["Дата", "Тип", "Категория", "Описание", "Сумма"])
         configure_table(self.table)
-        layout.addWidget(wrap(self.table))
+        self.table.setMinimumHeight(150)
+        layout.addWidget(wrap(self.table), 1)
 
     def refresh(self):
         with connect() as conn:
@@ -397,8 +402,7 @@ class PortfolioPage(QWidget):
                 put(self.table, r, c, value)
 
 class BondsPage(QWidget):
-    """Учебный рынок облигаций с плавающей рыночной ценой и полугодовыми купонами."""
-    def __init__(self):
+    """Учебный рынок облигаций с плавающей рыночной ценой и полугодовыми купонами."""    def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
         layout.addLayout(heading("Рынок облигаций", "Фиксированный купон · выплаты каждые шесть месяцев · цена меняется на рынке"))
@@ -797,8 +801,7 @@ class SimulationPage(QWidget):
 
 
 class ReportsPage(QWidget):
-    """Сводная аналитика денежных потоков, портфеля и инвестиционного результата."""
-    def __init__(self):
+    """Сводная аналитика денежных потоков, портфеля и инвестиционного результата."""    def __init__(self):
         super().__init__()
         outer = QVBoxLayout(self)
         outer.addLayout(heading("Отчёты", "Денежные потоки, инвестиционный результат и динамика капитала"))
@@ -1152,7 +1155,19 @@ class StockMarketPage(QWidget):
         market_layout.addWidget(self.market)
         layout.addWidget(market_box, 3)
 
+        history_controls = QHBoxLayout()
+        self.selected_stock = QLabel("Акция не выбрана")
+        self.history_toggle = QPushButton("История цены")
+        self.history_toggle.setEnabled(False)
+        self.history_toggle.clicked.connect(self.toggle_price_history)
+        history_controls.addWidget(self.selected_stock)
+        history_controls.addStretch()
+        history_controls.addWidget(self.history_toggle)
+        layout.addLayout(history_controls)
+
         history_box = QGroupBox("История цены выбранной акции")
+        self.history_box = history_box
+        history_box.setVisible(False)
         history_layout = QVBoxLayout(history_box)
         controls = QHBoxLayout()
         controls.addWidget(QLabel("Период:"))
@@ -1183,8 +1198,8 @@ class StockMarketPage(QWidget):
 
         trade_box = QGroupBox("Совершить сделку")
         trade_form = QHBoxLayout(trade_box)
-        self.selected_stock = QLabel("Выбери акцию в таблице выше")
-        self.selected_stock.setMinimumWidth(170)
+        self.selected_stock_trade = QLabel("Выбери акцию в таблице выше")
+        self.selected_stock_trade.setMinimumWidth(170)
         self.quantity = QDoubleSpinBox()
         self.quantity.setRange(0.01, 1_000_000)
         self.quantity.setDecimals(2)
@@ -1196,9 +1211,8 @@ class StockMarketPage(QWidget):
         sell.setObjectName("Sell")
         buy.clicked.connect(lambda: self.execute_trade("BUY"))
         sell.clicked.connect(lambda: self.execute_trade("SELL"))
-        trade_form.addWidget(self.selected_stock, 2)
-        trade_form.addWidget(QLabel("Количество:"))
-        trade_form.addWidget(self.quantity)
+        trade_form.addWidget(self.selected_stock_trade, 2)
+        trade_form.addWidget(QLabel("Количество:"))        trade_form.addWidget(self.quantity)
         trade_form.addWidget(buy)
         trade_form.addWidget(sell)
         layout.addWidget(trade_box)
@@ -1243,17 +1257,31 @@ class StockMarketPage(QWidget):
             for c, value in enumerate(vals):
                 put(self.holdings_table, r, c, value)
         self.update_selected_price()
-        self.refresh_price_history()
+        if self.history_box.isVisible():
+            self.refresh_price_history()
 
     def update_selected_price(self):
         row = self.market.currentRow()
         if row < 0:
-            self.selected_stock.setText("Выбери акцию в таблице выше")
+            self.selected_ticker = None
+            self.selected_stock.setText("Акция не выбрана")
+            self.selected_stock_trade.setText("Выбери акцию в таблице выше")
+            self.history_toggle.setEnabled(False)
             return
         item = self.market.item(row, 0)
         if item:
             self.selected_ticker = item.text()
-            self.selected_stock.setText(f"Выбрано: {self.selected_ticker}")
+            self.selected_stock.setText(f"Выбрана акция: {self.selected_ticker}")
+            self.selected_stock_trade.setText(f"Выбрано: {self.selected_ticker}")
+            self.history_toggle.setEnabled(True)
+            if self.history_box.isVisible():
+                self.refresh_price_history()
+
+    def toggle_price_history(self):
+        visible = not self.history_box.isVisible()
+        self.history_box.setVisible(visible)
+        self.history_toggle.setText("Скрыть историю" if visible else "История цены")
+        if visible:
             self.refresh_price_history()
 
     def move_market(self):
