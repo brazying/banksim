@@ -1257,7 +1257,7 @@ class StockMarketPage(QWidget):
             for c, value in enumerate(vals):
                 put(self.holdings_table, r, c, value)
         self.update_selected_price()
-        if self.history_box.isVisible():
+        if not self.history_box.isHidden():
             self.refresh_price_history()
 
     def update_selected_price(self):
@@ -1274,11 +1274,11 @@ class StockMarketPage(QWidget):
             self.selected_stock.setText(f"Выбрана акция: {self.selected_ticker}")
             self.selected_stock_trade.setText(f"Выбрано: {self.selected_ticker}")
             self.history_toggle.setEnabled(True)
-            if self.history_box.isVisible():
+            if not self.history_box.isHidden():
                 self.refresh_price_history()
 
     def toggle_price_history(self):
-        visible = not self.history_box.isVisible()
+        visible = self.history_box.isHidden()
         self.history_box.setVisible(visible)
         self.history_toggle.setText("Скрыть историю" if visible else "История цены")
         if visible:
