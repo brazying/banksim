@@ -223,11 +223,6 @@ class AppFlowTests(unittest.TestCase):
             reports.period.setCurrentIndex(index)
             reports.refresh()
 
-
-if __name__ == "__main__":
-    unittest.main()
-
-
     def test_manual_asset_purchase_uses_account_cash(self):
         portfolio = self.pages[3]
         start = self.cash()
@@ -252,3 +247,8 @@ if __name__ == "__main__":
         portfolio.price.setValue(100)
         portfolio.save_asset()
         self.assertEqual(self.cash(), start - 30_000)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
