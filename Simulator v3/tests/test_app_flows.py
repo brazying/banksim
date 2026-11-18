@@ -226,3 +226,29 @@ class AppFlowTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+    def test_manual_asset_purchase_uses_account_cash(self):
+        portfolio = self.pages[3]
+        start = self.cash()
+        portfolio.name.setText("Тестовый ручной актив")
+        portfolio.ticker.setText("MANUAL-1")
+        portfolio.quantity.setValue(2)
+        portfolio.avg_price.setValue(100)
+        portfolio.price.setValue(100)
+        portfolio.save_asset()
+        self.assertEqual(self.cash(), start - 20_000)
+        self.assertEqual(
+            self.one("SELECT quantity FROM assets WHERE name='Тестовый ручной актив'")[0], 2
+        )
+        self.assertEqual(
+            self.one("SELECT side,amount_cents FROM manual_asset_trades ORDER BY id DESC")[0],
+            "BUY",
+        )
+        portfolio.name.setText("Тестовый ручной актив")
+        portfolio.ticker.setText("MANUAL-1")
+        portfolio.quantity.setValue(3)
+        portfolio.avg_price.setValue(100)
+        portfolio.price.setValue(100)
+        portfolio.save_asset()
+        self.assertEqual(self.cash(), start - 30_000)
