@@ -270,3 +270,46 @@ def monte_carlo_capital(
         "p95_path": p95_by_year,
         "sample_paths": sample_paths,
     }
+
+
+def coupon_accrual_cents(trades, face_value_cents, coupon_rate, period_start, period_end):
+    """Купон за фактические дни владения внутри одного купонного периода.
+
+    Возвращает (сумма_в_копейках, среднее_количество_облигаций).
+    Сделки учитываются по календарным датам; покупка в день выплаты
+    относится уже к следующему купонному периоду.
+    """
+    from datetime import date
+
+    start = date.fromisoformat(str(period_start)[:10])
+    end = date.fromisoformat(str(period_end)[:10])
+    period_days = (end - start).days
+    if period_days <= 0:
+        raise ValueError("Некорректный купонный период.")
+
+    ordered = sorted(trades, key=lambda row: (str(row["trade_date"]), int(row["id"])))
+    quantity = 0.0
+    events = []
+    for trade in ordered:
+        trade_day = date.fromisoformat(str(trade["trade_date"])[:10])
+        change = float(trade["quantity"]) * (1 if trade["side"] == "BUY" else -1)
+        if trade_day < start:
+            quantity += change
+        elif trade_day < end:
+            events.append((trade_day, change))
+
+    quantity = max(0.0, quantity)
+    cursor = start
+    quantity_days = 0.0
+    for trade_day, change in events:
+        if trade_day > cursor:
+            quantity_days += quantity * (trade_day - cursor).days
+            cursor = trade_day
+        quantity = max(0.0, quantity + change)
+    if end > cursor:
+        quantity_days += quantity * (end - cursor).days
+
+    average_quantity = quantity_days / period_days
+    full_coupon_cents = face_value_cents * coupon_rate / 100 / 2
+    amount_cents = int(round(average_quantity * full_coupon_cents))
+    return max(0, amount_cents), average_quantity
