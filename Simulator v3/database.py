@@ -11,7 +11,12 @@ def add_months(value, months):
     day = min(value.day, calendar.monthrange(year, month)[1])
     return value.replace(year=year, month=month, day=day)
 
-DB_PATH = Path(__file__).parent / "data" / "ledger.sqlite3"
+# В собранной Windows-версии база хранится рядом с EXE, а не во временной папке PyInstaller.
+import sys
+if getattr(sys, "frozen", False):
+    DB_PATH = Path(sys.executable).resolve().parent / "data" / "ledger.sqlite3"
+else:
+    DB_PATH = Path(__file__).parent / "data" / "ledger.sqlite3"
 
 def connect():
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
