@@ -4,6 +4,18 @@ from matplotlib.figure import Figure
 from matplotlib.ticker import FuncFormatter
 from theme import SURFACE, LINE, MUTED, ACCENT, GOLD, PIE, TEXT
 
+def set_adaptive_y_limits(ax, values, padding=0.12):
+    """Подобрать диапазон Y по данным, не прижимая график к нулю."""
+    finite = [float(value) for value in values if value is not None]
+    finite = [value for value in finite if value == value and abs(value) != float("inf")]
+    if not finite:
+        return
+    low, high = min(finite), max(finite)
+    span = high - low
+    margin = max(span * padding, abs(high or low) * 0.015, 1.0)
+    ax.set_ylim(low - margin, high + margin)
+
+
 def style_axes(ax):
     ax.set_facecolor(SURFACE)
     ax.tick_params(colors=MUTED, labelsize=8, length=0)
@@ -52,6 +64,7 @@ class CapitalChart(_Chart):
         x = list(range(len(values)))
         self.axes.fill_between(x, values, color=ACCENT, alpha=0.10, linewidth=0)
         self.axes.plot(x, values, color=ACCENT, linewidth=1.6)
+        set_adaptive_y_limits(self.axes, values)
         tick_count = min(8, len(x))
         tick_indexes = (
             sorted({round(i * (len(x) - 1) / (tick_count - 1)) for i in range(tick_count)})
