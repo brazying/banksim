@@ -244,8 +244,35 @@ QHeaderView::section {
     font-weight: 700;
 }
 QScrollArea, QAbstractScrollArea {
-    background: transparent;
+    background: %(BG)s;
     border: none;
+}
+QAbstractScrollArea > QWidget#qt_scrollarea_viewport {
+    background: %(BG)s;
+}
+QTabWidget#ExchangeTabs::pane {
+    background: %(SURFACE)s;
+    border: 1px solid %(LINE)s;
+    border-radius: 9px;
+    top: -1px;
+}
+QTabWidget#ExchangeTabs QTabBar::tab {
+    background: transparent;
+    color: %(MUTED)s;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 10px 24px;
+    margin-right: 4px;
+    font-weight: 650;
+}
+QTabWidget#ExchangeTabs QTabBar::tab:hover {
+    color: %(TEXT)s;
+    background: %(RAISED)s;
+}
+QTabWidget#ExchangeTabs QTabBar::tab:selected {
+    color: %(TEXT)s;
+    border-bottom: 2px solid %(ACCENT)s;
+    background: %(RAISED)s;
 }
 QScrollBar:vertical {
     background: transparent;
