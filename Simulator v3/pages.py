@@ -835,7 +835,7 @@ class SimulationPage(QWidget):
             ax.yaxis.set_major_formatter(lambda value, _pos: f"{value:,.0f}".replace(",", " "))
             ax.legend(frameon=False, labelcolor=MUTED, fontsize=8)
             style_axes(ax)
-            self.figure.tight_layout()
+            self.figure.subplots_adjust(left=0.12, right=0.98, top=0.94, bottom=0.25)
             self.canvas.draw_idle()
 
             with connect() as conn:
@@ -1008,7 +1008,7 @@ class ReportsPage(QWidget):
         ax.set_xticklabels(months, rotation=30, ha="right", color=MUTED, fontsize=8)
         ax.legend(frameon=False, labelcolor=MUTED, fontsize=8)
         style_axes(ax)
-        self.flow_figure.tight_layout()
+        self.flow_figure.subplots_adjust(left=0.12, right=0.98, top=0.93, bottom=0.27)
         self.flow_canvas.draw_idle()
 
     def _draw_expenses(self, operations):
@@ -1033,7 +1033,7 @@ class ReportsPage(QWidget):
         ax.legend(wedges, labels, loc="center left", bbox_to_anchor=(0.98, 0.5),
                   frameon=False, fontsize=8, labelcolor=MUTED)
         ax.set_aspect("equal")
-        self.expense_figure.tight_layout()
+        self.expense_figure.subplots_adjust(left=0.02, right=0.72, top=0.94, bottom=0.06)
         self.expense_canvas.draw_idle()
 
     def _empty_chart(self, ax, canvas, message, axes_off=False):
@@ -1075,7 +1075,7 @@ class ReportsPage(QWidget):
         ax.set_xticklabels(labels, rotation=25, ha="right", color=MUTED, fontsize=7)
         ax.legend(frameon=False, labelcolor=MUTED, fontsize=8, ncol=3)
         style_axes(ax)
-        self.capital_figure.tight_layout()
+        self.capital_figure.subplots_adjust(left=0.11, right=0.98, top=0.93, bottom=0.28)
         self.capital_canvas.draw_idle()
 
     def _draw_allocation(self, positions):
@@ -1096,7 +1096,7 @@ class ReportsPage(QWidget):
         ax.legend(wedges, labels, loc="center", bbox_to_anchor=(0.5, 0.5),
                   frameon=False, fontsize=8, labelcolor=MUTED)
         ax.set_aspect("equal")
-        self.allocation_figure.tight_layout()
+        self.allocation_figure.subplots_adjust(left=0.06, right=0.94, top=0.94, bottom=0.06)
         self.allocation_canvas.draw_idle()
 
     def _draw_pnl(self, realized, unrealized, coupons):
@@ -1116,7 +1116,7 @@ class ReportsPage(QWidget):
                         va="bottom" if value >= 0 else "top", color=TEXT, fontsize=8)
         style_axes(ax)
         ax.grid(False, axis="x")
-        self.pnl_figure.tight_layout()
+        self.pnl_figure.subplots_adjust(left=0.08, right=0.98, top=0.92, bottom=0.30)
         self.pnl_canvas.draw_idle()
 
     def refresh(self):
