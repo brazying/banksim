@@ -240,7 +240,7 @@ def operation_rows(conn):
         rows.append({
             "date": row["payment_date"], "id": row["id"], "source": 3,
             "type": "Выплата купона", "category": "Купонный доход",
-            "description": row["ticker"] + " · полугодовая выплата",
+            "description": row["ticker"] + " · купон за срок владения",
             "amount": "+" + money(row["amount_cents"]), "delta": row["amount_cents"],
         })
     for row in redemptions:
