@@ -101,9 +101,13 @@ class AllocationChart(_Chart):
         self.axes.set_facecolor(SURFACE)
         wedges, _ = self.axes.pie(values, startangle=90, colors=PIE[:len(values)] * 2,
                                   wedgeprops={"width": 0.45, "edgecolor": SURFACE, "linewidth": 2})
-        self.axes.legend(wedges, labels, loc="lower center", bbox_to_anchor=(0.5, -0.12), ncol=2,
-                         frameon=False, fontsize=8, labelcolor=MUTED)
+        self.axes.legend(
+            wedges, labels, loc="upper center", bbox_to_anchor=(0.5, -0.04),
+            ncol=2, frameon=False, fontsize=7, labelcolor=MUTED,
+            columnspacing=1.0, handletextpad=0.4, borderaxespad=0.0
+        )
         self.axes.set_aspect("equal")
-        # Reserve room for the two-column legend below the donut.
-        self.figure.subplots_adjust(left=0.04, right=0.96, top=0.94, bottom=0.28)
+        # Reserve a dedicated band below the donut so the legend remains visible
+        # in the compact dashboard card as well as in a maximized window.
+        self.figure.subplots_adjust(left=0.04, right=0.96, top=0.94, bottom=0.40)
         self.canvas.draw_idle()
