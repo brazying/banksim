@@ -52,8 +52,19 @@ class CapitalChart(_Chart):
         x = list(range(len(values)))
         self.axes.fill_between(x, values, color=ACCENT, alpha=0.10, linewidth=0)
         self.axes.plot(x, values, color=ACCENT, linewidth=1.6)
-        self.axes.set_xticks(x)
-        self.axes.set_xticklabels(labels, rotation=30, ha="right", color=MUTED, fontsize=8)
+        tick_count = min(8, len(x))
+        tick_indexes = (
+            sorted({round(i * (len(x) - 1) / (tick_count - 1)) for i in range(tick_count)})
+            if tick_count > 1 else [0]
+        )
+        self.axes.set_xticks(tick_indexes)
+        self.axes.set_xticklabels(
+            [labels[i] for i in tick_indexes],
+            rotation=25,
+            ha="right",
+            color=MUTED,
+            fontsize=8,
+        )
         self.axes.margins(x=0.04)
         style_axes(self.axes)
         # Fixed margins are more reliable for embedded Qt canvases than tight_layout().
