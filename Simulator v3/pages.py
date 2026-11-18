@@ -470,10 +470,7 @@ class BondsPage(QWidget):
         self.quantity.setValue(1)
         buy = QPushButton("Купить")
         buy.setObjectName("Buy")
-        sell = QPushButton("Продать")
-        sell.setObjectName("Sell")
         buy.clicked.connect(lambda: self.execute_trade("BUY"))
-        sell.clicked.connect(lambda: self.execute_trade("SELL"))
         form.addWidget(self.selected, 2)
         form.addWidget(QLabel("Количество:"))
         form.addWidget(self.quantity)
@@ -1188,7 +1185,7 @@ class StockMarketPage(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.addLayout(heading("Рынок акций", "Котировки, динамика цен и сделки с акциями"))
+        layout.addLayout(heading("Акции", "Котировки, история цен и управление позициями"))
         summary = QHBoxLayout()
         self.cash_label = QLabel("Доступно: —")
         self.cash_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #dde0e4; font-family: Helvetica, Arial, sans-serif;")
@@ -1272,7 +1269,6 @@ class StockMarketPage(QWidget):
         trade_form.addWidget(QLabel("Количество:"))
         trade_form.addWidget(self.quantity)
         trade_form.addWidget(buy)
-        trade_form.addWidget(sell)
         layout.addWidget(trade_box)
 
         layout.addWidget(section("Мои акции"))
@@ -1282,9 +1278,30 @@ class StockMarketPage(QWidget):
         self.holdings_table.setHorizontalHeaderLabels(["Тикер", "Компания", "Количество", "Средняя покупка", "Текущая стоимость", "Прибыль / убыток", "Прибыль / убыток, %"])
         configure_table(self.holdings_table)
         connect_table_search(self.holdings_search, self.holdings_table)
+        self.holdings_table.itemSelectionChanged.connect(self.update_selected_holding)
         layout.addWidget(wrap(self.holdings_table), 2)
 
+        sell_box = QGroupBox("Продажа — только из «Мои акции»")
+        sell_form = QHBoxLayout(sell_box)
+        self.selected_stock_sell = QLabel("Выбери позицию в «Мои акции»")
+        self.selected_stock_sell.setMinimumWidth(220)
+        self.sell_quantity = QDoubleSpinBox()
+        self.sell_quantity.setRange(0.01, 1_000_000)
+        self.sell_quantity.setDecimals(2)
+        self.sell_quantity.setSingleStep(1.0)
+        self.sell_quantity.setValue(1.0)
+        self.sell_button = QPushButton("Продать")
+        self.sell_button.setObjectName("Sell")
+        self.sell_button.setEnabled(False)
+        self.sell_button.clicked.connect(lambda: self.execute_trade("SELL"))
+        sell_form.addWidget(self.selected_stock_sell, 2)
+        sell_form.addWidget(QLabel("Количество:"))
+        sell_form.addWidget(self.sell_quantity)
+        sell_form.addWidget(self.sell_button)
+        layout.addWidget(sell_box)
+
         self.selected_ticker = None
+        self.selected_sell_ticker = None
 
     def cash_balance(self, conn):
         return cash_balance(conn)
@@ -1318,10 +1335,25 @@ class StockMarketPage(QWidget):
             for c, value in enumerate(vals):
                 put(self.holdings_table, r, c, value)
         self.update_selected_price()
+        self.update_selected_holding()
         self.market_search.apply_filter(self.market_search.text())
         self.holdings_search.apply_filter(self.holdings_search.text())
         if not self.history_box.isHidden():
             self.refresh_price_history()
+
+    def update_selected_holding(self):
+        row = self.holdings_table.currentRow()
+        if row < 0:
+            self.selected_sell_ticker = None
+            self.selected_stock_sell.setText("Выбери позицию в «Мои акции»")
+            self.sell_button.setEnabled(False)
+            return
+        item = self.holdings_table.item(row, 0)
+        if item:
+            ticker = item.text()
+            self.selected_sell_ticker = ticker
+            self.selected_stock_sell.setText(f"Продажа: {ticker}")
+            self.sell_button.setEnabled(True)
 
     def update_selected_price(self):
         row = self.market.currentRow()
@@ -1438,11 +1470,15 @@ class StockMarketPage(QWidget):
             previous=price
 
     def execute_trade(self, side):
-        ticker = self.selected_ticker
+        ticker = self.selected_ticker if side == "BUY" else self.selected_sell_ticker
         if not ticker:
-            QMessageBox.warning(self, "Акция не выбрана", "Сначала выбери акцию в таблице котировок.")
+            QMessageBox.warning(
+                self,
+                "Акция не выбрана",
+                "Для покупки выбери акцию в «Котировки», а для продажи — позицию в «Мои акции»."
+            )
             return
-        quantity = round(self.quantity.value(), 2)
+        quantity = round(self.quantity.value() if side == "BUY" else self.sell_quantity.value(), 2)
         try:
             with connect() as conn:
                 stock = conn.execute("SELECT * FROM stocks WHERE ticker=?", (ticker,)).fetchone()
