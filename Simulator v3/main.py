@@ -86,9 +86,6 @@ class MainWindow(QMainWindow):
         brand = QLabel("bankSim")
         brand.setObjectName("Brand")
         side.addWidget(brand)
-        brand_caption = QLabel("PERSONAL FINANCE SIMULATOR")
-        brand_caption.setObjectName("BrandCaption")
-        side.addWidget(brand_caption)
         side.addSpacing(28)
 
         self.stack = QStackedWidget()
@@ -135,11 +132,6 @@ class MainWindow(QMainWindow):
                 page.setStyleSheet(f"background: {BG};")
                 self.stack.addWidget(page_scroll)
         side.addStretch()
-        side_footer = QLabel("Учебный финансовый симулятор")
-        side_footer.setObjectName("Muted")
-        side_footer.setWordWrap(True)
-        side_footer.setContentsMargins(18, 0, 12, 0)
-        side.addWidget(side_footer)
 
         content = QWidget()
         main = QVBoxLayout(content)
