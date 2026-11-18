@@ -1392,11 +1392,11 @@ class StockMarketPage(QWidget):
         trade_form = QHBoxLayout(trade_box)
         self.selected_stock_trade = QLabel("Выбери акцию в таблице выше")
         self.selected_stock_trade.setMinimumWidth(170)
-        self.quantity = QDoubleSpinBox()
-        self.quantity.setRange(0.01, 1_000_000)
-        self.quantity.setDecimals(2)
-        self.quantity.setSingleStep(1.0)
-        self.quantity.setValue(1.0)
+        # Акции в симуляторе торгуются только целыми штуками.
+        self.quantity = QSpinBox()
+        self.quantity.setRange(1, 1_000_000)
+        self.quantity.setSingleStep(1)
+        self.quantity.setValue(1)
         buy = QPushButton("Купить")
         buy.setObjectName("Buy")
         buy.clicked.connect(lambda: self.execute_trade("BUY"))
@@ -1420,11 +1420,10 @@ class StockMarketPage(QWidget):
         sell_form = QHBoxLayout(sell_box)
         self.selected_stock_sell = QLabel("Выбери позицию в «Мои акции»")
         self.selected_stock_sell.setMinimumWidth(220)
-        self.sell_quantity = QDoubleSpinBox()
-        self.sell_quantity.setRange(0.01, 1_000_000)
-        self.sell_quantity.setDecimals(2)
-        self.sell_quantity.setSingleStep(1.0)
-        self.sell_quantity.setValue(1.0)
+        self.sell_quantity = QSpinBox()
+        self.sell_quantity.setRange(1, 1_000_000)
+        self.sell_quantity.setSingleStep(1)
+        self.sell_quantity.setValue(1)
         self.sell_button = QPushButton("Продать")
         self.sell_button.setObjectName("Sell")
         self.sell_button.setEnabled(False)
@@ -1614,7 +1613,10 @@ class StockMarketPage(QWidget):
                 "Для покупки выбери акцию в «Котировки», а для продажи — позицию в «Мои акции»."
             )
             return
-        quantity = round(self.quantity.value() if side == "BUY" else self.sell_quantity.value(), 2)
+        quantity = int(self.quantity.value() if side == "BUY" else self.sell_quantity.value())
+        if quantity < 1:
+            QMessageBox.warning(self, "Некорректное количество", "Количество акций должно быть целым числом не меньше 1.")
+            return
         try:
             with connect() as conn:
                 stock = conn.execute("SELECT * FROM stocks WHERE ticker=?", (ticker,)).fetchone()
@@ -1640,7 +1642,7 @@ class StockMarketPage(QWidget):
                                  (ticker, new_qty, avg))
                 else:
                     if held + 1e-9 < quantity:
-                        raise ValueError(f"Недостаточно акций для продажи. У тебя: {held:.2f} шт.")
+                        raise ValueError(f"Недостаточно акций для продажи. У тебя: {held:g} шт.")
                     new_qty = round(held - quantity, 4)
                     conn.execute("UPDATE holdings SET quantity=?, average_price_cents=CASE WHEN ?=0 THEN 0 ELSE average_price_cents END WHERE ticker=?",
                                  (new_qty, new_qty, ticker))
@@ -1653,7 +1655,7 @@ class StockMarketPage(QWidget):
                 )
                 record_financial_snapshot(conn)
             action = "Куплено" if side == "BUY" else "Продано"
-            QMessageBox.information(self, "Сделка выполнена", f"{action} {quantity:.2f} акций {ticker} по {money(price)} за штуку.\nСумма: {money(total)}.")
+            QMessageBox.information(self, "Сделка выполнена", f"{action} {quantity} акций {ticker} по {money(price)} за штуку.\nСумма: {money(total)}.")
             self.refresh()
         except Exception as exc:
             QMessageBox.warning(self, "Не удалось совершить сделку", str(exc))
