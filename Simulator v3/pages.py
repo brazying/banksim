@@ -754,7 +754,7 @@ class DepositPage(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.addLayout(heading("Калькулятор вклада", "Оцени рост накоплений с учётом ставки и капитализации процентов"))
+        layout.addLayout(heading("Калькулятор вклада"))
         box = QGroupBox("Параметры")
         form = QFormLayout(box)
         self.principal = QDoubleSpinBox()
@@ -789,10 +789,6 @@ class DepositPage(QWidget):
         layout.addWidget(section("Результат расчёта"))
         layout.addWidget(self.result_card)
         layout.addWidget(self.interest)
-        explanation = QLabel("Это расчётный сценарий: он не открывает вклад и не изменяет деньги на банковском счёте.")
-        explanation.setWordWrap(True)
-        explanation.setObjectName("Muted")
-        layout.addWidget(explanation)
         layout.addStretch()
 
     def calculate(self):
@@ -818,7 +814,7 @@ class SimulationPage(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.addLayout(heading("Моделирование капитала", "Сценарный прогноз на основе текущего капитала и выбранных допущений"))
+        layout.addLayout(heading("Моделирование капитала"))
 
         current_box = QGroupBox("Текущая финансовая позиция")
         current_row = QHBoxLayout(current_box)
@@ -1421,7 +1417,7 @@ class StockMarketPage(QWidget):
 
         sell_box = QGroupBox("Продажа — только из «Мои акции»")
         sell_form = QHBoxLayout(sell_box)
-        self.selected_stock_sell = QLabel("Выбери позицию в «Мои акции»")
+        self.selected_stock_sell = QLabel("Позиция не выбрана")
         self.selected_stock_sell.setMinimumWidth(220)
         self.sell_quantity = QSpinBox()
         self.sell_quantity.setRange(1, 1_000_000)
@@ -1497,7 +1493,7 @@ class StockMarketPage(QWidget):
         row = self.holdings_table.currentRow()
         if row < 0:
             self.selected_sell_ticker = None
-            self.selected_stock_sell.setText("Выбери позицию в «Мои акции»")
+            self.selected_stock_sell.setText("Позиция не выбрана")
             self.sell_button.setEnabled(False)
             return
         item = self.holdings_table.item(row, 0)
@@ -1633,7 +1629,7 @@ class StockMarketPage(QWidget):
             QMessageBox.warning(
                 self,
                 "Акция не выбрана",
-                "Для покупки выбери акцию в «Котировки», а для продажи — позицию в «Мои акции»."
+                "Выбери акцию в разделе «Котировки» для покупки или в «Мои акции» для продажи."
             )
             return
         quantity = int(self.quantity.value() if side == "BUY" else self.sell_quantity.value())
