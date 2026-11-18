@@ -14,6 +14,7 @@ class FinancialLogicTests(unittest.TestCase):
             CREATE TABLE bond_trades(side TEXT, total_cents INTEGER);
             CREATE TABLE bond_coupon_payments(amount_cents INTEGER);
             CREATE TABLE bond_redemptions(amount_cents INTEGER);
+            CREATE TABLE manual_asset_trades(side TEXT, amount_cents INTEGER);
 
             CREATE TABLE assets(
                 name TEXT, ticker TEXT, quantity REAL,
@@ -44,7 +45,8 @@ class FinancialLogicTests(unittest.TestCase):
         self.conn.execute("INSERT INTO bond_coupon_payments VALUES(1000)")
         self.conn.execute("INSERT INTO bond_redemptions VALUES(100000)")
 
-        self.assertEqual(cash_balance(self.conn), 1_119_000)
+        self.conn.execute("INSERT INTO manual_asset_trades VALUES('BUY',5000)")
+        self.assertEqual(cash_balance(self.conn), 1_114_000)
 
     def test_portfolio_values_market_positions_once(self):
         self.conn.executemany(
@@ -136,3 +138,31 @@ class MoneyFormattingTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CouponAccrualTests(unittest.TestCase):
+    def test_buying_one_day_before_coupon_only_earns_one_day(self):
+        from finance import coupon_accrual_cents
+
+        trades = [{
+            "id": 1, "trade_date": "2026-12-31T12:00:00",
+            "side": "BUY", "quantity": 1.0,
+        }]
+        amount, average_quantity = coupon_accrual_cents(
+            trades, 100_000, 10.0, "2026-07-01", "2027-01-01"
+        )
+        self.assertEqual(amount, round((100_000 * 0.10 / 2) / 184))
+        self.assertAlmostEqual(average_quantity, 1 / 184)
+
+    def test_full_period_holding_earns_full_coupon(self):
+        from finance import coupon_accrual_cents
+
+        trades = [{
+            "id": 1, "trade_date": "2026-06-30T12:00:00",
+            "side": "BUY", "quantity": 2.0,
+        }]
+        amount, average_quantity = coupon_accrual_cents(
+            trades, 100_000, 10.0, "2026-07-01", "2027-01-01"
+        )
+        self.assertEqual(amount, 10_000)
+        self.assertAlmostEqual(average_quantity, 2.0)
