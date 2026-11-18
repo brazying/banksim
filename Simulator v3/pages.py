@@ -834,6 +834,8 @@ class SimulationPage(QWidget):
         self.rate = QDoubleSpinBox()
         self.rate.setRange(-99, 100)
         self.rate.setDecimals(2)
+        # Не фиксировать промежуточный ввод знака минус как минимальное значение.
+        self.rate.setKeyboardTracking(False)
         self.rate.setValue(8)
         self.volatility = QDoubleSpinBox()
         self.volatility.setRange(0, 100)
