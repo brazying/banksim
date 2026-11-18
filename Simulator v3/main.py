@@ -1,9 +1,65 @@
 import sys
-from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel, QStackedWidget, QFrame, QScrollArea
+from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel, QStackedWidget, QFrame, QScrollArea, QTabWidget
 from PyQt6.QtCore import Qt, QTimer
 from database import init_db
 from pages import DashboardPage, AccountPage, PortfolioPage, DepositPage, SimulationPage, ReportsPage, StockMarketPage, BondsPage
 from theme import STYLE
+
+from theme import STYLE, BG, SURFACE, LINE, TEXT, MUTED, ACCENT
+
+class ExchangePage(QWidget):
+    def __init__(self, stocks_page, bonds_page):
+        super().__init__()
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        header = QVBoxLayout()
+        header.setSpacing(2)
+        title = QLabel("Биржа")
+        title.setObjectName("PageTitle")
+        subtitle = QLabel("Акции и облигации в одном разделе")
+        subtitle.setObjectName("PageSub")
+        header.addWidget(title)
+        header.addWidget(subtitle)
+        layout.addLayout(header)
+
+        self.tabs = QTabWidget()
+        self.tabs.setDocumentMode(True)
+        self.tabs.setUsesScrollButtons(False)
+        self.tabs.setObjectName("ExchangeTabs")
+        self.stocks_page = stocks_page
+        self.bonds_page = bonds_page
+        self.tabs.addTab(self._scroll_page(stocks_page), "Акции")
+        self.tabs.addTab(self._scroll_page(bonds_page), "Облигации")
+        self.tabs.currentChanged.connect(self.refresh_current)
+        layout.addWidget(self.tabs, 1)
+
+    def _scroll_page(self, page):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet(
+            f"QScrollArea {{ background: {BG}; border: none; }}"
+            f"QScrollArea > QWidget > QWidget {{ background: {BG}; }}"
+        )
+        scroll.viewport().setStyleSheet(f"background: {BG};")
+        page.setStyleSheet(f"background: {BG};")
+        scroll.setWidget(page)
+        return scroll
+
+    def current_page(self):
+        scroll = self.tabs.currentWidget()
+        return scroll.widget() if isinstance(scroll, QScrollArea) else scroll
+
+    def refresh_current(self):
+        page = self.current_page()
+        if hasattr(page, "refresh"):
+            page.refresh()
+
+    def refresh(self):
+        self.refresh_current()
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -35,11 +91,11 @@ class MainWindow(QMainWindow):
         self.stack = QStackedWidget()
         self.stock_market_page = StockMarketPage()
         self.bonds_page = BondsPage()
+        self.exchange_page = ExchangePage(self.stock_market_page, self.bonds_page)
         pages = [
             ("Обзор", DashboardPage()),
             ("Банковский счёт", AccountPage()),
-            ("Биржа", self.stock_market_page),
-            ("Облигации", self.bonds_page),
+            ("Биржа", self.exchange_page),
             ("Портфель", PortfolioPage()),
             ("Вклады", DepositPage()),
             ("Моделирование", SimulationPage()),
@@ -95,6 +151,8 @@ class MainWindow(QMainWindow):
         current = self.current_page()
         if isinstance(current, SimulationPage):
             current.refresh_live_values()
+        elif current is self.exchange_page:
+            self.exchange_page.refresh()
         elif current not in (self.stock_market_page, self.bonds_page) and hasattr(current, "refresh"):
             current.refresh()
 
