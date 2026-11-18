@@ -110,14 +110,28 @@ QPushButton#Nav:checked {
     font-weight: 700;
 }
 QPushButton#Action {
-    background: %(ACCENT)s;
-    border: 1px solid %(ACCENT)s;
-    color: #101820;
-    font-weight: 700;
+    background: #315f8f;
+    border: 1px solid #4779a9;
+    color: #ffffff;
+    font-weight: 750;
 }
 QPushButton#Action:hover {
-    background: %(ACCENT_HI)s;
-    border-color: %(ACCENT_HI)s;
+    background: #3d74aa;
+    border-color: #6594c2;
+    color: #ffffff;
+}
+QPushButton#Action:pressed {
+    background: #274d75;
+    border-color: #274d75;
+    color: #ffffff;
+}
+QPushButton#Action:disabled {
+    background: #303a45;
+    border-color: #303a45;
+    color: #aab4bf;
+}
+QWidget#ReportsPage, QWidget#ReportsBody {
+    background: %(BG)s;
 }
 QPushButton#AccountAction {
     background: #79a9df;
