@@ -34,7 +34,7 @@ TRANSACTION_LABELS = {
 }
 
 NUMERIC = {"Сумма", "Цена", "Изменение", "Изменение, %", "Итого", "Количество", "Кол-во",
-           "Средняя покупка", "Ср. покупка", "Текущая", "Текущая стоимость", "Прибыль / убыток", "Прибыль / убыток, %"}
+           "Средняя покупка", "Ср. покупка", "Текущая", "Текущая стоимость", "Прибыль / убыток", "Прибыль / убыток, %", "Изменение, %"}
 RIGHT = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
 LEFT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 
@@ -478,7 +478,7 @@ class PortfolioPage(QWidget):
         layout.addWidget(section("Активы в портфеле"))
         self.search = table_search("Поиск по названию или тикеру")
         layout.addWidget(self.search)
-        self.table = QTableWidget(0, 7)
+        self.table = QTableWidget(0, 6)
         self.table.setHorizontalHeaderLabels(["Название", "Тикер", "Кол-во", "Текущая стоимость", "Изменение", "Изменение, %"])
         configure_table(self.table)
         connect_table_search(self.search, self.table)
