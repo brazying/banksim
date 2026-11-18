@@ -56,7 +56,8 @@ class CapitalChart(_Chart):
         self.axes.set_xticklabels(labels, rotation=30, ha="right", color=MUTED, fontsize=8)
         self.axes.margins(x=0.04)
         style_axes(self.axes)
-        self.figure.tight_layout()
+        # Fixed margins are more reliable for embedded Qt canvases than tight_layout().
+        self.figure.subplots_adjust(left=0.10, right=0.98, top=0.94, bottom=0.27)
         self.canvas.draw_idle()
 
 class AllocationChart(_Chart):
@@ -79,5 +80,6 @@ class AllocationChart(_Chart):
         self.axes.legend(wedges, labels, loc="lower center", bbox_to_anchor=(0.5, -0.12), ncol=2,
                          frameon=False, fontsize=8, labelcolor=MUTED)
         self.axes.set_aspect("equal")
-        self.figure.tight_layout()
+        # Reserve room for the two-column legend below the donut.
+        self.figure.subplots_adjust(left=0.04, right=0.96, top=0.94, bottom=0.28)
         self.canvas.draw_idle()
