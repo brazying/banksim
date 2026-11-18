@@ -1,5 +1,5 @@
 import sys
-from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel, QStackedWidget, QFrame
+from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, QPushButton, QLabel, QStackedWidget, QFrame, QScrollArea
 from PyQt6.QtCore import Qt, QTimer
 from database import init_db
 from pages import DashboardPage, AccountPage, PortfolioPage, DepositPage, SimulationPage, ReportsPage, StockMarketPage, BondsPage
@@ -46,6 +46,7 @@ class MainWindow(QMainWindow):
             ("Отчёты", ReportsPage()),
         ]
         self.nav_buttons = []
+        self.page_widgets = []
         for index, (label, page) in enumerate(pages):
             button = QPushButton(label)
             button.setObjectName("Nav")
@@ -56,7 +57,15 @@ class MainWindow(QMainWindow):
             button.clicked.connect(lambda checked=False, i=index: self.navigate(i))
             side.addWidget(button)
             self.nav_buttons.append(button)
-            self.stack.addWidget(page)
+            self.page_widgets.append(page)
+            if label == "Отчёты":
+                self.stack.addWidget(page)
+            else:
+                page_scroll = QScrollArea()
+                page_scroll.setWidgetResizable(True)
+                page_scroll.setFrameShape(QFrame.Shape.NoFrame)
+                page_scroll.setWidget(page)
+                self.stack.addWidget(page_scroll)
         side.addStretch()
         side_footer = QLabel("Учебный финансовый симулятор")
         side_footer.setObjectName("Muted")
@@ -83,7 +92,7 @@ class MainWindow(QMainWindow):
         self.bonds_page.move_bond_market()
         # Страницы, не являющиеся рынками, тоже должны показывать актуальные
         # деньги и стоимость портфеля после купонов, погашений и переоценки.
-        current = self.stack.currentWidget()
+        current = self.current_page()
         if isinstance(current, SimulationPage):
             current.refresh_live_values()
         elif current not in (self.stock_market_page, self.bonds_page) and hasattr(current, "refresh"):
@@ -96,9 +105,15 @@ class MainWindow(QMainWindow):
         self.refresh_all()
 
     def refresh_all(self):
-        page = self.stack.currentWidget()
+        page = self.current_page()
         if hasattr(page, "refresh"):
             page.refresh()
+
+    def current_page(self):
+        current = self.stack.currentWidget()
+        if isinstance(current, QScrollArea):
+            return current.widget()
+        return current
 
 def main():
     init_db()
