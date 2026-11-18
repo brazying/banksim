@@ -44,6 +44,13 @@ def init_db():
             average_price_cents INTEGER NOT NULL DEFAULT 0 CHECK(average_price_cents >= 0),
             current_price_cents INTEGER NOT NULL DEFAULT 0 CHECK(current_price_cents >= 0)
         );
+        CREATE TABLE IF NOT EXISTS manual_asset_trades (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            trade_date TEXT NOT NULL,
+            asset_name TEXT NOT NULL,
+            side TEXT NOT NULL CHECK(side IN ('BUY','SELL')),
+            amount_cents INTEGER NOT NULL CHECK(amount_cents > 0)
+        );
         CREATE TABLE IF NOT EXISTS deposit_scenarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             principal_cents INTEGER NOT NULL,
@@ -310,7 +317,11 @@ def cash_balance(conn):
     ).fetchone()[0]
     coupons = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM bond_coupon_payments").fetchone()[0]
     redemptions = conn.execute("SELECT COALESCE(SUM(amount_cents),0) FROM bond_redemptions").fetchone()[0]
-    return int(income - expense + stock_cash + bond_cash + coupons + redemptions)
+    manual_assets = conn.execute(
+        "SELECT COALESCE(SUM(CASE WHEN side='SELL' THEN amount_cents ELSE -amount_cents END),0) "
+        "FROM manual_asset_trades"
+    ).fetchone()[0]
+    return int(income - expense + stock_cash + bond_cash + coupons + redemptions + manual_assets)
 
 
 
