@@ -1,55 +1,279 @@
-BG, SURFACE, RAISED, LINE = "#181a1d", "#202327", "#2a2e33", "#33383e"
-TEXT, MUTED = "#dde0e4", "#8a9097"
-ACCENT, ACCENT_HI = "#6f9bd1", "#9bbbe0"
-UP, DOWN, GOLD = "#5aa97a", "#c9605a", "#c9a24d"
-PIE = ["#6f9bd1", "#5aa97a", "#c9a24d", "#8f7fc4", "#c9605a", "#5fb0b3", "#b08968", "#8a9097"]
-FONT = "'Helvetica', Arial, sans-serif"
-MONO = "'Helvetica', Arial, sans-serif"
+BG = "#111418"
+SURFACE = "#191e24"
+RAISED = "#222a33"
+LINE = "#303a45"
+TEXT = "#e7edf4"
+MUTED = "#94a1af"
+ACCENT = "#79a9df"
+ACCENT_HI = "#9bc4f0"
+UP = "#5fbd91"
+DOWN = "#e07878"
+GOLD = "#d5b36b"
+PIE = ["#79a9df", "#5fbd91", "#d5b36b", "#a28bd5", "#e07878", "#5fb7bd", "#c18e70", "#94a1af"]
+FONT = "'Inter', 'Segoe UI', Arial, sans-serif"
+MONO = "'Cascadia Mono', 'Consolas', monospace"
 
 STYLE = """
-QWidget { color:%(TEXT)s; font-family:%(FONT)s; font-size:13px; }
-QMainWindow, QDialog, QMessageBox, QWidget#Root { background:%(BG)s; }
-QToolTip { background:%(RAISED)s; color:%(TEXT)s; border:1px solid %(LINE)s; padding:3px; }
-QFrame#Sidebar { background:%(SURFACE)s; border:none; border-right:1px solid %(LINE)s; }
-QLabel#Brand { font-size:16px; font-weight:600; padding:0 12px; }
-QLabel#Muted { color:%(MUTED)s; font-size:11px; padding:0 12px; }
-QLabel#PageTitle { font-size:20px; font-weight:600; }
-QLabel#PageSub { color:%(MUTED)s; }
-QLabel#Section { color:%(MUTED)s; padding-top:8px; }
-QPushButton { background:%(RAISED)s; border:1px solid %(LINE)s; border-radius:3px; padding:7px 14px; }
-QPushButton:hover { border-color:%(MUTED)s; }
-QPushButton#Nav { background:transparent; border:none; border-left:2px solid transparent; border-radius:0; color:%(MUTED)s; text-align:left; padding:9px 12px; }
-QPushButton#Nav:hover { color:%(TEXT)s; background:%(RAISED)s; }
-QPushButton#Nav:checked { color:%(TEXT)s; background:%(RAISED)s; border-left:2px solid %(ACCENT)s; }
-QPushButton#Action { background:%(ACCENT)s; border:1px solid %(ACCENT)s; color:#101316; font-weight:600; }
-QPushButton#Action:hover { background:%(ACCENT_HI)s; border-color:%(ACCENT_HI)s; }
-QPushButton#Buy { background:transparent; border:1px solid %(UP)s; color:%(UP)s; font-weight:600; }
-QPushButton#Buy:hover { background:%(UP)s; color:#101316; }
-QPushButton#Sell { background:transparent; border:1px solid %(DOWN)s; color:%(DOWN)s; font-weight:600; }
-QPushButton#Sell:hover { background:%(DOWN)s; color:#101316; }
-QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox { background:%(BG)s; border:1px solid %(LINE)s; border-radius:3px; padding:5px 8px; selection-background-color:%(ACCENT)s; selection-color:#101316; }
-QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus { border-color:%(ACCENT)s; }
-QDoubleSpinBox, QSpinBox { font-family:%(MONO)s; }
-QComboBox::drop-down { border:none; width:22px; }
-QComboBox QAbstractItemView { background:%(RAISED)s; border:1px solid %(LINE)s; selection-background-color:%(ACCENT)s; selection-color:#101316; outline:0; }
-QGroupBox { background:%(SURFACE)s; border:1px solid %(LINE)s; border-radius:4px; margin-top:0; padding-top:34px; }
-QGroupBox::title { subcontrol-origin:padding; subcontrol-position:top left; padding:10px 14px; color:%(MUTED)s; }
-QFrame#Card { background:%(SURFACE)s; border:1px solid %(LINE)s; border-radius:4px; }
-QFrame#Metric, QFrame#Hero { background:%(SURFACE)s; border:none; border-top:2px solid %(LINE)s; border-radius:0; }
-QFrame#Hero { border-top:2px solid %(ACCENT)s; }
-QFrame#Metric QLabel, QFrame#Hero QLabel { background:transparent; }
-QLabel#MetricTitle { color:%(MUTED)s; }
-QLabel#MetricValue { font-family:%(MONO)s; font-size:22px; }
-QTableWidget { background:transparent; border:none; gridline-color:transparent; outline:0; }
-QTableWidget::item { border-bottom:1px solid %(LINE)s; padding:0 8px; }
-QTableWidget::item:selected { background:%(RAISED)s; color:%(TEXT)s; }
-QHeaderView { background:transparent; }
-QHeaderView::section { background:transparent; color:%(MUTED)s; padding:8px; border:none; border-bottom:1px solid %(MUTED)s; text-align:left; }
-QScrollBar:vertical { background:transparent; width:9px; margin:0; }
-QScrollBar::handle:vertical { background:%(LINE)s; min-height:30px; }
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height:0; }
-QScrollBar:horizontal { background:transparent; height:9px; }
-QScrollBar::handle:horizontal { background:%(LINE)s; min-width:30px; }
-QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width:0; }
-""" % dict(BG=BG, SURFACE=SURFACE, RAISED=RAISED, LINE=LINE, TEXT=TEXT, MUTED=MUTED, ACCENT=ACCENT,
-           ACCENT_HI=ACCENT_HI, UP=UP, DOWN=DOWN, FONT=FONT, MONO=MONO)
+QWidget {
+    color: %(TEXT)s;
+    font-family: %(FONT)s;
+    font-size: 13px;
+}
+QMainWindow, QDialog, QMessageBox, QWidget#Root {
+    background: %(BG)s;
+}
+QToolTip {
+    background: %(RAISED)s;
+    color: %(TEXT)s;
+    border: 1px solid %(LINE)s;
+    padding: 6px 8px;
+    border-radius: 5px;
+}
+QFrame#Sidebar {
+    background: %(SURFACE)s;
+    border: none;
+    border-right: 1px solid %(LINE)s;
+}
+QLabel#Brand {
+    font-size: 21px;
+    font-weight: 750;
+    letter-spacing: 0.5px;
+    padding: 0 18px;
+    color: %(TEXT)s;
+}
+QLabel#BrandCaption {
+    color: %(MUTED)s;
+    font-size: 10px;
+    padding: 2px 18px 0 18px;
+}
+QLabel#Muted {
+    color: %(MUTED)s;
+    font-size: 11px;
+    padding: 2px 0;
+}
+QLabel#PageTitle {
+    font-size: 25px;
+    font-weight: 700;
+    color: %(TEXT)s;
+    padding-bottom: 1px;
+}
+QLabel#PageSub {
+    color: %(MUTED)s;
+    font-size: 12px;
+}
+QLabel#Section {
+    color: %(TEXT)s;
+    font-size: 14px;
+    font-weight: 650;
+    padding-top: 9px;
+    padding-bottom: 2px;
+}
+QPushButton {
+    background: %(RAISED)s;
+    border: 1px solid %(LINE)s;
+    border-radius: 7px;
+    padding: 8px 14px;
+    min-height: 18px;
+}
+QPushButton:hover {
+    background: #2a3541;
+    border-color: #506174;
+}
+QPushButton:pressed {
+    background: %(SURFACE)s;
+}
+QPushButton:disabled {
+    color: #687481;
+    background: %(SURFACE)s;
+    border-color: %(LINE)s;
+}
+QPushButton#Nav {
+    background: transparent;
+    border: none;
+    border-left: 3px solid transparent;
+    border-radius: 0 7px 7px 0;
+    color: %(MUTED)s;
+    text-align: left;
+    padding: 11px 15px;
+    margin: 2px 9px 2px 0;
+    min-height: 20px;
+    font-weight: 550;
+}
+QPushButton#Nav:hover {
+    color: %(TEXT)s;
+    background: %(RAISED)s;
+}
+QPushButton#Nav:checked {
+    color: %(TEXT)s;
+    background: #273444;
+    border-left: 3px solid %(ACCENT)s;
+    font-weight: 700;
+}
+QPushButton#Action {
+    background: %(ACCENT)s;
+    border: 1px solid %(ACCENT)s;
+    color: #101820;
+    font-weight: 700;
+}
+QPushButton#Action:hover {
+    background: %(ACCENT_HI)s;
+    border-color: %(ACCENT_HI)s;
+}
+QPushButton#Buy {
+    background: rgba(95, 189, 145, 0.08);
+    border: 1px solid %(UP)s;
+    color: %(UP)s;
+    font-weight: 700;
+}
+QPushButton#Buy:hover {
+    background: %(UP)s;
+    color: #101820;
+}
+QPushButton#Sell {
+    background: rgba(224, 120, 120, 0.08);
+    border: 1px solid %(DOWN)s;
+    color: %(DOWN)s;
+    font-weight: 700;
+}
+QPushButton#Sell:hover {
+    background: %(DOWN)s;
+    color: #101820;
+}
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {
+    background: %(BG)s;
+    border: 1px solid %(LINE)s;
+    border-radius: 7px;
+    padding: 8px 10px;
+    min-height: 19px;
+    selection-background-color: %(ACCENT)s;
+    selection-color: #101820;
+}
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus, QDoubleSpinBox:focus {
+    border-color: %(ACCENT)s;
+}
+QDoubleSpinBox, QSpinBox {
+    font-family: %(MONO)s;
+}
+QComboBox::drop-down {
+    border: none;
+    width: 25px;
+}
+QComboBox QAbstractItemView {
+    background: %(RAISED)s;
+    border: 1px solid %(LINE)s;
+    selection-background-color: %(ACCENT)s;
+    selection-color: #101820;
+    outline: 0;
+    padding: 4px;
+}
+QGroupBox {
+    background: %(SURFACE)s;
+    border: 1px solid %(LINE)s;
+    border-radius: 10px;
+    margin-top: 12px;
+    padding: 20px 12px 12px 12px;
+    font-weight: 600;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 12px;
+    top: 0;
+    padding: 0 5px;
+    color: %(MUTED)s;
+    background: %(SURFACE)s;
+    font-size: 12px;
+    font-weight: 600;
+}
+QFrame#Card {
+    background: %(SURFACE)s;
+    border: 1px solid %(LINE)s;
+    border-radius: 9px;
+}
+QFrame#Metric, QFrame#Hero {
+    background: %(SURFACE)s;
+    border: 1px solid %(LINE)s;
+    border-top: 3px solid %(LINE)s;
+    border-radius: 9px;
+}
+QFrame#Hero {
+    border-top: 3px solid %(ACCENT)s;
+    background: #1b2530;
+}
+QFrame#Metric QLabel, QFrame#Hero QLabel {
+    background: transparent;
+}
+QLabel#MetricTitle {
+    color: %(MUTED)s;
+    font-size: 11px;
+    font-weight: 600;
+}
+QLabel#MetricValue {
+    font-family: %(MONO)s;
+    font-size: 21px;
+    font-weight: 700;
+    padding-top: 3px;
+}
+QTableWidget {
+    background: transparent;
+    alternate-background-color: #1d242c;
+    border: none;
+    gridline-color: transparent;
+    outline: 0;
+    selection-background-color: #2b3d50;
+    selection-color: %(TEXT)s;
+}
+QTableWidget::item {
+    border-bottom: 1px solid %(LINE)s;
+    padding: 5px 8px;
+}
+QTableWidget::item:selected {
+    background: #2b3d50;
+    color: %(TEXT)s;
+}
+QHeaderView {
+    background: transparent;
+}
+QHeaderView::section {
+    background: %(RAISED)s;
+    color: %(MUTED)s;
+    padding: 9px 8px;
+    border: none;
+    border-bottom: 1px solid %(LINE)s;
+    font-size: 11px;
+    font-weight: 700;
+}
+QScrollArea, QAbstractScrollArea {
+    background: transparent;
+    border: none;
+}
+QScrollBar:vertical {
+    background: transparent;
+    width: 9px;
+    margin: 0;
+}
+QScrollBar::handle:vertical {
+    background: %(LINE)s;
+    min-height: 30px;
+    border-radius: 4px;
+}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0;
+}
+QScrollBar:horizontal {
+    background: transparent;
+    height: 9px;
+}
+QScrollBar::handle:horizontal {
+    background: %(LINE)s;
+    min-width: 30px;
+    border-radius: 4px;
+}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0;
+}
+QFormLayout QLabel {
+    color: %(MUTED)s;
+}
+""" % dict(BG=BG, SURFACE=SURFACE, RAISED=RAISED, LINE=LINE, TEXT=TEXT, MUTED=MUTED,
+           ACCENT=ACCENT, ACCENT_HI=ACCENT_HI, UP=UP, DOWN=DOWN, FONT=FONT, MONO=MONO)
