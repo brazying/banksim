@@ -119,6 +119,30 @@ QPushButton#Action:hover {
     background: %(ACCENT_HI)s;
     border-color: %(ACCENT_HI)s;
 }
+QPushButton#AccountAction {
+    background: #79a9df;
+    border: 1px solid #9bc4f0;
+    border-radius: 8px;
+    color: #101820;
+    padding: 11px 20px;
+    min-height: 20px;
+    font-size: 14px;
+    font-weight: 750;
+}
+QPushButton#AccountAction:hover {
+    background: #9bc4f0;
+    border-color: #b7d6f5;
+    color: #101820;
+}
+QPushButton#AccountAction:pressed {
+    background: #5f91c7;
+    border-color: #5f91c7;
+}
+QPushButton#AccountAction:disabled {
+    background: #303a45;
+    border-color: #303a45;
+    color: #8793a0;
+}
 QPushButton#Buy {
     background: rgba(95, 189, 145, 0.08);
     border: 1px solid %(UP)s;
@@ -229,6 +253,17 @@ QTableWidget::item {
 }
 QTableWidget::item:selected {
     background: #2b3d50;
+    color: %(TEXT)s;
+}
+QTableWidget#StockQuotes {
+    background: %(SURFACE)s;
+    alternate-background-color: %(SURFACE)s;
+}
+QTableWidget#StockQuotes::item {
+    background: %(SURFACE)s;
+}
+QTableWidget#StockQuotes::item:selected {
+    background: #303b48;
     color: %(TEXT)s;
 }
 QHeaderView {
