@@ -1413,7 +1413,9 @@ class StockMarketPage(QWidget):
         self.history_axes.tick_params(axis="x",labelrotation=30,labelcolor=MUTED)
         self.history_axes.tick_params(axis="y",labelcolor=MUTED)
         style_axes(self.history_axes)
-        self.history_figure.tight_layout()
+        # Keep explicit margins for the embedded history chart; tight_layout() can
+        # emit warnings when Qt gives the canvas a small height.
+        self.history_figure.subplots_adjust(left=0.13, right=0.98, top=0.94, bottom=0.28)
         self.history_canvas.draw_idle()
         self.price_history.setRowCount(len(shown))
         previous=None
