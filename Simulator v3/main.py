@@ -44,9 +44,12 @@ class ExchangePage(QWidget):
             f"QScrollArea {{ background: {BG}; border: none; }}"
             f"QScrollArea > QWidget > QWidget {{ background: {BG}; }}"
         )
+        scroll.viewport().setAutoFillBackground(False)
         scroll.viewport().setStyleSheet(f"background: {BG};")
+        page.setAutoFillBackground(False)
         page.setStyleSheet(f"background: {BG};")
         scroll.setWidget(page)
+        page.setAutoFillBackground(False)
         return scroll
 
     def current_page(self):
@@ -120,7 +123,16 @@ class MainWindow(QMainWindow):
                 page_scroll = QScrollArea()
                 page_scroll.setWidgetResizable(True)
                 page_scroll.setFrameShape(QFrame.Shape.NoFrame)
+                page_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+                page_scroll.setStyleSheet(
+                    f"QScrollArea {{ background: {BG}; border: none; }}"
+                    f"QAbstractScrollArea#qt_scrollarea_viewport {{ background: {BG}; }}"
+                )
+                page_scroll.viewport().setAutoFillBackground(False)
+                page_scroll.viewport().setStyleSheet(f"background: {BG};")
                 page_scroll.setWidget(page)
+                page.setAutoFillBackground(False)
+                page.setStyleSheet(f"background: {BG};")
                 self.stack.addWidget(page_scroll)
         side.addStretch()
         side_footer = QLabel("Учебный финансовый симулятор")
