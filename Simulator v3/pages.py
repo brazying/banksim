@@ -16,11 +16,12 @@ from PyQt6.QtCore import Qt
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.figure import Figure
 from database import connect, record_financial_snapshot, simulated_datetime, cash_balance, portfolio_totals
-from finance import to_cents, money, compound_interest, projected_value, monte_carlo, monte_carlo_price_step, monte_carlo_capital
+from finance import (to_cents, money, compound_interest, projected_value, monte_carlo,
+                     monte_carlo_price_step, monte_carlo_capital, coupon_accrual_cents)
 
 # Максимальное значение, которое SQLite может хранить в столбце INTEGER.
 SQLITE_MAX_INT = 2**63 - 1
-from charts import CapitalChart, AllocationChart, style_axes
+from charts import CapitalChart, AllocationChart, style_axes, set_adaptive_y_limits
 from theme import *
 from PyQt6.QtGui import QColor, QFont
 
@@ -202,6 +203,7 @@ def operation_rows(conn):
     bond_trades = conn.execute("SELECT * FROM bond_trades").fetchall()
     coupons = conn.execute("SELECT * FROM bond_coupon_payments").fetchall()
     redemptions = conn.execute("SELECT * FROM bond_redemptions").fetchall()
+    manual_asset_trades = conn.execute("SELECT * FROM manual_asset_trades").fetchall()
 
     for row in transactions:
         plus = row["tx_type"] in ("Income", "Deposit")
@@ -247,6 +249,17 @@ def operation_rows(conn):
             "type": "Погашение облигации", "category": "Погашение",
             "description": row["ticker"] + " · возврат номинала",
             "amount": "+" + money(row["amount_cents"]), "delta": row["amount_cents"],
+        })
+    for row in manual_asset_trades:
+        is_buy = row["side"] == "BUY"
+        amount = int(row["amount_cents"])
+        rows.append({
+            "date": row["trade_date"], "id": row["id"], "source": 5,
+            "type": "Покупка ручного актива" if is_buy else "Уменьшение ручного актива",
+            "category": "Инвестиции · ручные активы",
+            "description": row["asset_name"],
+            "amount": ("−" if is_buy else "+") + money(amount),
+            "delta": -amount if is_buy else amount,
         })
     rows.sort(key=lambda item: (item["date"], item["id"], item["source"]), reverse=True)
     return rows
@@ -458,7 +471,7 @@ class PortfolioPage(QWidget):
         form.addRow("Текущая цена", self.price)
         form.addRow("", add)
         layout.addWidget(box)
-        asset_note = QLabel("Ручное добавление актива учитывает его стоимость в портфеле, но не списывает деньги со счёта. Для реальной покупки используй вкладки биржи или облигаций.")
+        asset_note = QLabel("Добавление или увеличение позиции списывает её себестоимость со счёта. Уменьшение позиции возвращает соответствующую часть себестоимости.")
         asset_note.setWordWrap(True)
         asset_note.setObjectName("Muted")
         layout.addWidget(asset_note)
@@ -480,11 +493,40 @@ class PortfolioPage(QWidget):
             qty = self.quantity.value()
             avg = to_cents(self.avg_price.value())
             current = to_cents(self.price.value())
+            ticker = self.ticker.text().strip().upper()
+            purchase_cost = int(round(qty * avg))
+            if purchase_cost <= 0 or purchase_cost > SQLITE_MAX_INT:
+                raise ValueError("Себестоимость актива выходит за допустимые пределы.")
             with connect() as conn:
+                if ticker and (
+                    conn.execute("SELECT 1 FROM stocks WHERE ticker=?", (ticker,)).fetchone()
+                    or conn.execute("SELECT 1 FROM bonds WHERE ticker=?", (ticker,)).fetchone()
+                ):
+                    raise ValueError("Этот тикер уже используется на бирже. Для ручного актива укажи другой тикер или оставь поле пустым.")
+                existing = conn.execute(
+                    "SELECT quantity,average_price_cents FROM assets WHERE name=?", (name,)
+                ).fetchone()
+                old_cost = (
+                    int(round(float(existing["quantity"]) * int(existing["average_price_cents"])))
+                    if existing else 0
+                )
+                difference = purchase_cost - old_cost
+                if difference > 0:
+                    available = cash_balance(conn)
+                    if available < difference:
+                        raise ValueError(
+                            f"Недостаточно средств. Нужно {money(difference)}, доступно {money(available)}."
+                        )
+                if difference:
+                    conn.execute(
+                        "INSERT INTO manual_asset_trades(trade_date,asset_name,side,amount_cents) VALUES(?,?,?,?)",
+                        (simulated_datetime(conn).isoformat(timespec="seconds"), name,
+                         "BUY" if difference > 0 else "SELL", abs(difference))
+                    )
                 conn.execute("""INSERT INTO assets(name,ticker,quantity,average_price_cents,current_price_cents)
                     VALUES(?,?,?,?,?) ON CONFLICT(name) DO UPDATE SET ticker=excluded.ticker, quantity=excluded.quantity,
                     average_price_cents=excluded.average_price_cents,current_price_cents=excluded.current_price_cents""",
-                    (name, self.ticker.text().strip().upper(), qty, avg, current))
+                    (name, ticker, qty, avg, current))
                 record_financial_snapshot(conn)
             self.name.clear()
             self.ticker.clear()
@@ -569,19 +611,19 @@ class BondsPage(QWidget):
             current_quantity = float(holding["quantity"]) if holding else 0.0
             average_price = int(holding["average_price_cents"]) if holding else 0
 
-            # Купон получает количество облигаций, находившееся в портфеле на дату выплаты.
+            # Купон начисляется только за фактические дни владения внутри периода.
             while next_date <= today and next_date <= maturity:
-                payment_cutoff = next_date.isoformat() + "T00:00:00"
-                eligible = conn.execute(
-                    """SELECT COALESCE(SUM(CASE WHEN side='BUY' THEN quantity ELSE -quantity END),0)
-                       FROM bond_trades WHERE ticker=? AND trade_date<=?""",
-                    (bond["ticker"], payment_cutoff)
-                ).fetchone()[0]
-                quantity = max(0.0, float(eligible or 0.0))
-                if quantity > 0:
-                    amount = int(round(
-                        quantity * bond["face_value_cents"] * bond["coupon_rate"] / 100 / 2
-                    ))
+                period_start = add_months(next_date, -6)
+                period_trades = conn.execute(
+                    "SELECT id,trade_date,side,quantity FROM bond_trades "
+                    "WHERE ticker=? AND trade_date<? ORDER BY trade_date,id",
+                    (bond["ticker"], next_date.isoformat() + "T23:59:59")
+                ).fetchall()
+                amount, quantity = coupon_accrual_cents(
+                    period_trades, bond["face_value_cents"], bond["coupon_rate"],
+                    period_start.isoformat(), next_date.isoformat()
+                )
+                if amount > 0:
                     conn.execute(
                         "INSERT INTO bond_coupon_payments(payment_date,ticker,quantity,amount_cents) VALUES(?,?,?,?)",
                         (next_date.isoformat(), bond["ticker"], quantity, amount)
@@ -936,6 +978,7 @@ class ReportsPage(QWidget):
 
     def __init__(self):
         super().__init__()
+        self.setObjectName("ReportsPage")
         outer = QVBoxLayout(self)
         outer.addLayout(heading("Отчёты", "Денежные потоки, доходность и динамика капитала за выбранный период"))
 
@@ -953,10 +996,14 @@ class ReportsPage(QWidget):
         outer.addLayout(filters)
 
         scroll = QScrollArea()
+        scroll.setObjectName("ReportsScroll")
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet(f"QScrollArea, QAbstractScrollArea {{ background: {BG}; border: none; }}")
         outer.addWidget(scroll, 1)
         body = QWidget()
+        body.setObjectName("ReportsBody")
+        body.setAutoFillBackground(True)
         scroll.setWidget(body)
         layout = QVBoxLayout(body)
         layout.setContentsMargins(0, 8, 8, 8)
@@ -1156,9 +1203,11 @@ class ReportsPage(QWidget):
                   if i % step == 0 or i == len(rows)-1 else "" for i, r in enumerate(rows)]
         ax.set_xticks(x)
         ax.set_xticklabels(labels, rotation=25, ha="right", color=MUTED, fontsize=7)
-        ax.legend(frameon=False, labelcolor=MUTED, fontsize=8, ncol=3)
+        ax.legend(frameon=False, labelcolor=MUTED, fontsize=8, ncol=3,
+                  loc="lower center", bbox_to_anchor=(0.5, 1.02), borderaxespad=0.0)
+        set_adaptive_y_limits(ax, cash + portfolio + net)
         style_axes(ax)
-        self.capital_figure.subplots_adjust(left=0.11, right=0.98, top=0.93, bottom=0.28)
+        self.capital_figure.subplots_adjust(left=0.11, right=0.98, top=0.78, bottom=0.28)
         self.capital_canvas.draw_idle()
 
     def _draw_allocation(self, positions):
@@ -1226,7 +1275,9 @@ class ReportsPage(QWidget):
         outflows = -sum(row["delta"] for row in operations if row["delta"] < 0)
         net_flow = inflows - outflows
         purchases = -sum(row["delta"] for row in operations
-                         if row["delta"] < 0 and row["type"] in ("Покупка акций", "Покупка облигаций"))
+                         if row["delta"] < 0 and row["type"] in (
+                             "Покупка акций", "Покупка облигаций", "Покупка ручного актива"
+                         ))
         unrealized = portfolio_value - portfolio_cost
 
         self.income_metric.value_label.setText(money(inflows))
@@ -1525,6 +1576,7 @@ class StockMarketPage(QWidget):
         prices = [row["price_cents"]/100 for row in shown]
         self.history_axes.plot(times,prices,linewidth=1.8,marker="o" if len(times)<=20 else None,
                                markersize=3,color=ACCENT)
+        set_adaptive_y_limits(self.history_axes, prices)
         self.history_axes.set_ylabel("Цена, ₽",color=MUTED)
         self.history_axes.tick_params(axis="x",labelrotation=30,labelcolor=MUTED)
         self.history_axes.tick_params(axis="y",labelcolor=MUTED)
