@@ -75,8 +75,12 @@ def configure_table(table):
     table.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
     table.horizontalHeader().setDefaultAlignment(LEFT)
+    table.horizontalHeader().setStretchLastSection(True)
     table.verticalHeader().setVisible(False)
-    table.verticalHeader().setDefaultSectionSize(40)
+    table.verticalHeader().setDefaultSectionSize(38)
+    table.setAlternatingRowColors(True)
+    table.setWordWrap(False)
+    table.setMinimumHeight(210)
     for c in range(table.columnCount()):
         h = table.horizontalHeaderItem(c)
         if h and h.text() in NUMERIC:
@@ -89,6 +93,25 @@ def wrap(table):
     lay.setContentsMargins(6, 6, 6, 6)
     lay.addWidget(table)
     return card
+
+def table_search(placeholder):
+    field = QLineEdit()
+    field.setPlaceholderText(placeholder)
+    field.setClearButtonEnabled(True)
+    return field
+
+
+def connect_table_search(field, table):
+    def apply_filter(query):
+        query = query.strip().casefold()
+        for row in range(table.rowCount()):
+            matches = not query or any(
+                query in (table.item(row, col).text().casefold() if table.item(row, col) else "")
+                for col in range(table.columnCount())
+            )
+            table.setRowHidden(row, not matches)
+    field.textChanged.connect(apply_filter)
+
 
 def put(table, r, c, value, color=None, bold=False):
     text = str(value)
@@ -178,7 +201,7 @@ class DashboardPage(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.addLayout(heading("Обзор", ""))
+        layout.addLayout(heading("Обзор", "Финансовое состояние, активы и последние операции"))
         row = QHBoxLayout()
         self.balance = metric("Баланс счёта", "0,00 ₽")
         self.portfolio = metric("Стоимость портфеля", "0,00 ₽")
@@ -248,7 +271,7 @@ class AccountPage(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.addLayout(heading("Банковский счёт", ""))
+        layout.addLayout(heading("Банковский счёт", "Управление денежными средствами и история операций"))
         self.balance_label = QLabel("Текущий баланс: —")
         self.balance_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #dde0e4; font-family: Helvetica, Arial, sans-serif; padding: 4px 0;")
         layout.addWidget(self.balance_label)
@@ -275,9 +298,12 @@ class AccountPage(QWidget):
         form.addRow("", add)
         layout.addWidget(form_box)
         layout.addWidget(section("История операций"))
+        self.search = table_search("Поиск по типу, категории или описанию")
+        layout.addWidget(self.search)
         self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(["Дата", "Тип", "Категория", "Описание", "Сумма"])
         configure_table(self.table)
+        connect_table_search(self.search, self.table)
         layout.addWidget(wrap(self.table))
 
     def add_transaction(self):
@@ -328,7 +354,13 @@ class PortfolioPage(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.addLayout(heading("Портфель", ""))
+        layout.addLayout(heading("Портфель", "Состав активов, стоимость позиций и инвестиционный результат"))
+        summary = QHBoxLayout()
+        self.total_metric = metric("Стоимость портфеля", "—", hero=True)
+        self.pnl_metric = metric("Нереализованный результат", "—")
+        summary.addWidget(self.total_metric, 1)
+        summary.addWidget(self.pnl_metric, 1)
+        layout.addLayout(summary)
         box = QGroupBox("Добавить / обновить актив")
         form = QFormLayout(box)
         self.name = QLineEdit()
@@ -359,9 +391,12 @@ class PortfolioPage(QWidget):
         asset_note.setObjectName("Muted")
         layout.addWidget(asset_note)
         layout.addWidget(section("Активы в портфеле"))
+        self.search = table_search("Поиск по названию или тикеру")
+        layout.addWidget(self.search)
         self.table = QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(["Название", "Тикер", "Кол-во", "Ср. покупка", "Текущая", "Прибыль / убыток", "Прибыль / убыток, %"])
         configure_table(self.table)
+        connect_table_search(self.search, self.table)
         layout.addWidget(wrap(self.table))
 
     def save_asset(self):
@@ -387,8 +422,12 @@ class PortfolioPage(QWidget):
 
     def refresh(self):
         with connect() as conn:
-            positions, _, _ = portfolio_totals(conn)
+            positions, _, total_value = portfolio_totals(conn)
 
+        total_cost = sum(int(round(row[2] * row[3])) for row in positions)
+        total_pnl = total_value - total_cost
+        self.total_metric.value_label.setText(money(total_value))
+        self.pnl_metric.value_label.setText(("+" if total_pnl > 0 else "") + money(total_pnl))
         self.table.setRowCount(len(positions))
         for r, row in enumerate(positions):
             name, ticker, qty, avg_price, current_price, _kind = row
@@ -407,13 +446,16 @@ class BondsPage(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.addLayout(heading("Рынок облигаций", "Фиксированный купон · выплаты каждые шесть месяцев · цена меняется на рынке"))
+        layout.addLayout(heading("Рынок облигаций", "Выбирай выпуски, отслеживай купоны и управляй позициями"))
         self.summary = QLabel("Доступно: —")
         self.summary.setStyleSheet("font-size: 16px; font-weight: bold;")
         layout.addWidget(self.summary)
+        self.market_search = table_search("Найти выпуск или эмитента")
+        layout.addWidget(self.market_search)
         self.market = QTableWidget(0, 8)
         self.market.setHorizontalHeaderLabels(["Тикер", "Эмитент", "Тип", "Цена", "Купон годовых", "Выплата за штуку", "Следующий купон", "Погашение"])
         configure_table(self.market)
+        connect_table_search(self.market_search, self.market)
         self.market.itemSelectionChanged.connect(self.update_selected)
         layout.addWidget(wrap(self.market), 3)
         trade = QGroupBox("Сделка с облигациями")
@@ -596,7 +638,7 @@ class DepositPage(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.addLayout(heading("Калькулятор вклада", ""))
+        layout.addLayout(heading("Калькулятор вклада", "Оцени рост накоплений с учётом ставки и капитализации процентов"))
         box = QGroupBox("Параметры")
         form = QFormLayout(box)
         self.principal = QDoubleSpinBox()
@@ -616,8 +658,8 @@ class DepositPage(QWidget):
         self.compounds.addItem("Ежеквартально", 4)
         self.compounds.addItem("Ежемесячно", 12)
         self.compounds.addItem("Ежедневно", 365)
-        self.result = QLabel("—")
-        self.result.setStyleSheet("font-size: 24px; color: #dde0e4; font-family: Helvetica, Arial, sans-serif; font-weight: bold;")
+        self.result_card = metric("Прогнозируемая сумма", "—", hero=True)
+        self.result = self.result_card.value_label
         self.interest = QLabel("")
         calc = QPushButton("Рассчитать")
         calc.setObjectName("Action")
@@ -628,8 +670,8 @@ class DepositPage(QWidget):
         form.addRow("Капитализация", self.compounds)
         form.addRow("", calc)
         layout.addWidget(box)
-        layout.addWidget(section("Прогноз баланса"))
-        layout.addWidget(self.result)
+        layout.addWidget(section("Результат расчёта"))
+        layout.addWidget(self.result_card)
         layout.addWidget(self.interest)
         explanation = QLabel("Это расчётный сценарий: он не открывает вклад и не изменяет деньги на банковском счёте.")
         explanation.setWordWrap(True)
@@ -654,7 +696,7 @@ class SimulationPage(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.addLayout(heading("Моделирование капитала", "Прогноз на основе фактического баланса и текущей стоимости портфеля"))
+        layout.addLayout(heading("Моделирование капитала", "Сценарный прогноз на основе текущего капитала и выбранных допущений"))
 
         current_box = QGroupBox("Текущая финансовая позиция")
         current_row = QHBoxLayout(current_box)
@@ -808,7 +850,7 @@ class ReportsPage(QWidget):
     def __init__(self):
         super().__init__()
         outer = QVBoxLayout(self)
-        outer.addLayout(heading("Отчёты", "Денежные потоки, инвестиционный результат и динамика капитала"))
+        outer.addLayout(heading("Отчёты", "Денежные потоки, доходность и динамика капитала за выбранный период"))
 
         filters = QHBoxLayout()
         filters.addWidget(QLabel("Период операций и графиков:"))
@@ -891,9 +933,12 @@ class ReportsPage(QWidget):
         layout.addWidget(wrap(self.breakdown))
 
         layout.addWidget(section("История операций за выбранный период"))
+        self.history_search = table_search("Поиск по истории операций")
+        layout.addWidget(self.history_search)
         self.history = QTableWidget(0, 5)
         self.history.setHorizontalHeaderLabels(["Дата", "Тип", "Категория", "Описание", "Сумма"])
         configure_table(self.history)
+        connect_table_search(self.history_search, self.history)
         layout.addWidget(wrap(self.history))
 
         note = QLabel(
@@ -1138,7 +1183,7 @@ class StockMarketPage(QWidget):
     def __init__(self):
         super().__init__()
         layout = QVBoxLayout(self)
-        layout.addLayout(heading("Рынок акций", "32 компании · учебные котировки с независимой волатильностью"))
+        layout.addLayout(heading("Рынок акций", "Котировки, динамика цен и сделки с акциями"))
         summary = QHBoxLayout()
         self.cash_label = QLabel("Доступно: —")
         self.cash_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #dde0e4; font-family: Helvetica, Arial, sans-serif;")
@@ -1151,9 +1196,12 @@ class StockMarketPage(QWidget):
 
         market_box = QGroupBox("Котировки")
         market_layout = QVBoxLayout(market_box)
+        self.market_search = table_search("Поиск по тикеру или названию компании")
+        market_layout.addWidget(self.market_search)
         self.market = QTableWidget(0, 5)
         self.market.setHorizontalHeaderLabels(["Тикер", "Компания", "Цена", "Изменение", "Изменение, %"])
         configure_table(self.market)
+        connect_table_search(self.market_search, self.market)
         self.market.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.market.itemSelectionChanged.connect(self.update_selected_price)
         market_layout.addWidget(self.market)
@@ -1223,9 +1271,12 @@ class StockMarketPage(QWidget):
         layout.addWidget(trade_box)
 
         layout.addWidget(section("Мои акции"))
+        self.holdings_search = table_search("Поиск в моих акциях")
+        layout.addWidget(self.holdings_search)
         self.holdings_table = QTableWidget(0, 7)
         self.holdings_table.setHorizontalHeaderLabels(["Тикер", "Компания", "Количество", "Средняя покупка", "Текущая стоимость", "Прибыль / убыток", "Прибыль / убыток, %"])
         configure_table(self.holdings_table)
+        connect_table_search(self.holdings_search, self.holdings_table)
         layout.addWidget(wrap(self.holdings_table), 2)
 
         self.selected_ticker = None
