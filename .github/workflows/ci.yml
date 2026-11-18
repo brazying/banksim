@@ -1,4 +1,4 @@
-name: bankSim verification
+name: bankSim verification and Windows build
 
 on:
   push:
@@ -31,3 +31,35 @@ jobs:
         run: python -m compileall -q .
       - name: Run automated tests
         run: python -m unittest discover -s tests -v
+
+  build-windows:
+    if: github.event_name == 'push'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install application and packager dependencies
+        working-directory: Simulator v3
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install pyinstaller
+      - name: Build Windows application
+        working-directory: Simulator v3
+        run: |
+          python -m PyInstaller --noconfirm --clean --windowed --onedir --name bankSim --collect-all PyQt6 --collect-all matplotlib main.py
+      - name: Create ZIP archive
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "Simulator v3/dist/bankSim/*" -DestinationPath "bankSim-Windows.zip" -Force
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: bankSim-Windows
+          path: bankSim-Windows.zip
+          if-no-files-found: error
+          retention-days: 14
