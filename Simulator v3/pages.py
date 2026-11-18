@@ -34,7 +34,7 @@ TRANSACTION_LABELS = {
 }
 
 NUMERIC = {"Сумма", "Цена", "Изменение", "Изменение, %", "Итого", "Количество", "Кол-во",
-           "Средняя покупка", "Ср. покупка", "Текущая", "Текущая стоимость", "Прибыль / убыток", "Прибыль / убыток, %", "Изменение, %"}
+           "Средняя покупка", "Ср. покупка", "Текущая", "Текущая стоимость", "Прибыль / убыток", "Прибыль / убыток, %"}
 RIGHT = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
 LEFT = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
 
@@ -1511,9 +1511,13 @@ class StockMarketPage(QWidget):
         row = self.market.currentRow()
         if row < 0:
             self.selected_ticker = None
-            self.selected_stock.setText("Акция не выбрана")
             self.selected_stock_trade.setText("Выбери акцию в таблице выше")
-            self.history_toggle.setEnabled(False)
+            if self.history_ticker and self.history_box.isVisible():
+                self.selected_stock.setText(f"История позиции: {self.history_ticker}")
+                self.history_toggle.setEnabled(True)
+            else:
+                self.selected_stock.setText("Акция не выбрана")
+                self.history_toggle.setEnabled(False)
             return
         item = self.market.item(row, 0)
         if item:
